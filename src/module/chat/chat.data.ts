@@ -28,10 +28,10 @@ export const CHAT_RECENT_THREADS_LIMIT = 9;
 export const CHAT_ARCHIVED_THREADS_LIMIT = 5;
 
 export const chatSuggestions = [
-  "What are the latest trends in AI?",
-  "How does machine learning work?",
-  "Explain quantum computing",
-  "Best practices for React development",
-  "Tell me about TypeScript benefits",
-  "How to optimize database queries?",
+  "Explain how temperature changes model behavior",
+  "Compare reasoning on vs off for the same prompt",
+  "What tokens are counted in this response?",
+  "Walk me through the chat request lifecycle",
+  "How would you design credits for an AI API?",
+  "Summarize tradeoffs between local and cloud models",
 ];

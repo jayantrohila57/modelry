@@ -1,7 +1,8 @@
-import { Copyright, LogIn } from "lucide-react";
+import { Copyright } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { BrandLogo } from "@/shared/components/layout/brand/brand-logo";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/shared/components/ui/card";
 import { PATH } from "@/shared/config/routes";
 import { site } from "@/shared/config/site";
@@ -62,9 +63,12 @@ export function AuthFooterNote({ hint, action, href }: { hint: string; action: s
 
 export function AppBrand({ className }: { className?: string }) {
   return (
-    <p className={cn("text-muted-foreground text-center text-xs", className)}>
-      <Copyright className="mr-1 inline-block h-3 w-3" /> {`Copyright ${new Date().getFullYear()} - ${site.name}`} All
-      rights reserved
-    </p>
+    <div className={cn("flex flex-col items-center gap-3", className)}>
+      <BrandLogo showTagline size="sm" className="justify-center" />
+      <p className="text-muted-foreground text-center text-xs">
+        <Copyright className="mr-1 inline-block h-3 w-3" />
+        {`Copyright ${new Date().getFullYear()} ${site.name}. All rights reserved.`}
+      </p>
+    </div>
   );
 }

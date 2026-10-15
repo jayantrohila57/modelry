@@ -9,8 +9,8 @@ import {
   GlobeIcon,
   Info,
   InfoIcon,
+  Layers,
   MessageCircleIcon,
-  MessageSquarePlus,
   MoreHorizontal,
   Sparkles,
   XIcon,
@@ -516,14 +516,14 @@ function EmptyConversationState({ mode }: { mode: "landing" | "thread" }) {
   return (
     <div className="flex min-h-[280px] flex-col items-center justify-center px-6 py-12 text-center">
       <div className="bg-primary/10 text-primary mb-4 flex size-14 items-center justify-center rounded-3xl">
-        <Sparkles className="size-6" />
+        <Layers className="size-6 stroke-[2.25]" />
       </div>
       <h2 className="text-xl font-semibold">
-        {mode === "landing" ? "Start your first real chat" : "This thread is empty"}
+        {mode === "landing" ? "Run your first experiment" : "This thread is empty"}
       </h2>
       <p className="text-muted-foreground mt-2 max-w-xl text-sm leading-6">
         {mode === "landing"
-          ? "Choose a local model, tune reasoning, and the first send will create a real thread automatically."
+          ? "Pick a model, adjust reasoning, and send a prompt. Modelry will create a thread and surface tokens, cost, and behavior as the model responds."
           : "Send a message to begin this thread. Responses, chain of thought, token usage, and credit cost will appear here once the model replies."}
       </p>
     </div>
@@ -570,11 +570,11 @@ function ThreadToolbar({
         ) : (
           <div className="flex items-center gap-3">
             <div className="bg-primary/10 text-primary flex size-10 items-center justify-center rounded-2xl">
-              <MessageSquarePlus className="size-5" />
+              <Layers className="size-5 stroke-[2.25]" />
             </div>
             <div>
-              <p className="text-muted-foreground text-xs uppercase tracking-[0.24em]">Chat Home</p>
-              <h1 className="font-semibold text-lg">Start a new conversation</h1>
+              <p className="text-muted-foreground text-xs uppercase tracking-[0.24em]">Modelry Lab</p>
+              <h1 className="font-semibold text-lg">New experiment</h1>
             </div>
           </div>
         )}

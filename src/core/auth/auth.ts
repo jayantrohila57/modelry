@@ -3,7 +3,6 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { createAuthMiddleware } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { admin as adminPlugin } from "better-auth/plugins/admin";
-import { passkey } from "better-auth/plugins/passkey";
 import { twoFactor } from "better-auth/plugins/two-factor";
 import { db } from "@/core/db/db";
 import {
@@ -15,12 +14,15 @@ import {
 import { serverEnv } from "@/shared/config/env.server";
 import { site } from "@/shared/config/site";
 import { debugLog } from "@/shared/utils/lib/logger.utils";
+import { resolveBetterAuthBaseUrl, resolveBetterAuthSecret } from "./auth.env";
 import { resolveNewUserRole } from "./auth.roles";
 import { ac, admin, customer, staff, user } from "./permissions";
 
 const MAX_AGE = 60 * 60; // 1 hour
 
 export const auth = betterAuth({
+  secret: resolveBetterAuthSecret(),
+  baseURL: resolveBetterAuthBaseUrl(),
   logger: {
     disabled: false,
     disableColors: false,
@@ -120,7 +122,6 @@ export const auth = betterAuth({
   plugins: [
     nextCookies(),
     twoFactor(),
-    passkey(),
     adminPlugin({
       ac,
       roles: {

@@ -384,7 +384,7 @@ async function openCheckoutFlow(input: {
   const checkout = new Razorpay({
     key: input.payload.keyId,
     subscription_id: input.payload.providerSubscriptionId,
-    name: "AI Chat App v1",
+    name: "Modelry",
     description: `${input.payload.planName} monthly subscription`,
     image: "/logo.png",
     handler: input.onSuccess,

@@ -5,8 +5,8 @@ const routesSource = readFileSync(new URL("../src/shared/config/routes.ts", impo
 const siteSource = readFileSync(new URL("../src/shared/config/site.ts", import.meta.url), "utf8");
 const apiRoutesSource = readFileSync(new URL("../src/core/api/api.routes.ts", import.meta.url), "utf8");
 
-assert.match(siteSource, /name:\s*"AI Chat App v1"/);
-assert.match(siteSource, /description:\s*"[^"]*AI chat starter[^"]*"/i);
+assert.match(siteSource, /name:\s*"Modelry"/);
+assert.match(siteSource, /description:\s*"[^"]*interactive AI laboratory[^"]*"/i);
 
 assert.match(routesSource, /ROOT:\s*"\/"/);
 assert.match(routesSource, /AUTH:\s*\{/);

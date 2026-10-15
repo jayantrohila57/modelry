@@ -1,8 +1,9 @@
 "use client";
 
-import { LogIn, MessageCircle } from "lucide-react";
+import { Layers, LogIn } from "lucide-react";
 import Link from "next/link";
 import { useSession } from "@/core/auth/auth.client";
+import { BrandLogo } from "@/shared/components/layout/brand/brand-logo";
 import { Separator } from "../../ui/separator";
 import {
   Sidebar,
@@ -29,18 +30,14 @@ export function AppSidebar() {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" className="group">
-              <div className="flex aspect-square bg-primary size-8 items-center justify-center rounded-lg">
-                <MessageCircle className="size-4 fill-primary-foreground stroke-primary-foreground block group-data-[state=collapsed]:hidden" />
-                <SidebarTrigger
-                  asChild
-                  className="size-4 stroke-primary-foreground hidden group-data-[state=collapsed]:block group-hover:fill-primary"
-                />
+              <div
+                className="hidden aspect-square size-8 items-center justify-center rounded-lg bg-[#152238] text-white group-data-[collapsible=icon]:flex dark:bg-[#1e3a5f]"
+                aria-hidden
+              >
+                <Layers className="size-4 stroke-[2.25]" />
               </div>
-              <div className="grid flex-1 text-left text-base font-bold leading-tight">
-                <Link href="/" className="truncate font-medium hover:underline">
-                  AI Chat
-                </Link>
-                <span className="truncate text-xs text-muted-foreground font-mono">v1.0.0</span>
+              <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+                <BrandLogo showTagline size="sm" />
               </div>
               <SidebarTrigger asChild />
             </SidebarMenuButton>
@@ -74,9 +71,7 @@ export function AppSidebar() {
                       </div>
                       <div className="grid flex-1 text-left text-sm leading-tight">
                         <span className="truncate font-medium">Sign In</span>
-                        <span className="truncate text-xs text-muted-foreground font-mono">
-                          Access chatting with AI.
-                        </span>
+                        <span className="truncate text-xs text-muted-foreground">Open the laboratory.</span>
                       </div>
                     </Link>
                   </SidebarMenuButton>

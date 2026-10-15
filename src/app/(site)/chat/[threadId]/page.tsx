@@ -7,8 +7,8 @@ import type { PersistedChatMessage } from "@/module/chat/chat-message.utils";
 import { PATH } from "@/shared/config/routes";
 
 export const metadata = {
-  title: "Chat Thread",
-  description: "Continue an AI chat conversation.",
+  title: "Experiment",
+  description: "Continue a Modelry experiment and inspect model behavior.",
 };
 
 export default async function ChatThreadPage({ params }: { params: Promise<{ threadId: string }> }) {

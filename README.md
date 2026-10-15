@@ -1,6 +1,8 @@
-# AI Chat App v1
+# Modelry
 
-Backend-first MVP foundation for a public AI chat application built on Next.js App Router, tRPC, Better Auth, Drizzle, and Neon.
+**See what happens inside AI.**
+
+Modelry is an interactive AI laboratory where developers experiment with language models, understand their behavior, and learn how AI-powered software actually works. Built on Next.js App Router, tRPC, Better Auth, Drizzle, and Neon.
 
 ## What is implemented
 

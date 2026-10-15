@@ -30,7 +30,7 @@ export function UserDropdown() {
   const user = session?.user;
   const fallbackName = session?.user?.name
     ?.split(" ")
-    ?.map((name) => name?.[0])
+    ?.map((name: string) => name?.[0])
     ?.join("");
   const hasPaidPlan = Boolean(viewer?.billing?.hasPaidPlan);
 

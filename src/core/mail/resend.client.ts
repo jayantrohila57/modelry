@@ -2,9 +2,20 @@ import { Resend } from "resend";
 import { serverEnv } from "@/shared/config/env.server";
 import { siteConfig } from "@/shared/config/site";
 
-const mail = new Resend(serverEnv.RESEND_API_KEY);
+let mail: Resend | undefined;
 
-export default mail;
+function getResendClient() {
+  if (!serverEnv.RESEND_API_KEY) {
+    throw new Error("RESEND_API_KEY is not configured");
+  }
+
+  mail ??= new Resend(serverEnv.RESEND_API_KEY);
+  return mail;
+}
+
+export default function resendClient() {
+  return getResendClient();
+}
 
 export function sendEmail({
   to,
@@ -19,7 +30,7 @@ export function sendEmail({
   text: string;
   from?: string;
 }) {
-  return mail.emails.send({
+  return getResendClient().emails.send({
     from: from || `${siteConfig.email.from.name} <${serverEnv.RESEND_FROM_EMAIL}>`,
     to,
     subject,

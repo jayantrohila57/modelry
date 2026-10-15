@@ -1,18 +1,19 @@
 import { clientEnv } from "./env.client";
 
 export const siteConfig = {
-  name: "AI Chat App v1",
-  domain: "localhost",
+  name: "Modelry",
+  tagline: "See what happens inside AI.",
+  domain: "modelry.app",
   description:
-    "AI Chat App v1 is a clean AI chat starter built on Next.js, Better Auth, tRPC, Drizzle, uploads, and rate limiting.",
+    "Modelry is an interactive AI laboratory where developers experiment with language models, understand their behavior, and learn how AI-powered software actually works.",
   contact: {
-    email: "support@aichat.local",
-    supportEmail: "support@aichat.local",
-    noreplyEmail: "noreply@aichat.local",
+    email: "support@modelry.app",
+    supportEmail: "support@modelry.app",
+    noreplyEmail: "noreply@modelry.app",
     phone: "+1 (555) 000-0000",
     address: {
-      line1: "Starter Workspace",
-      line2: "AI Team",
+      line1: "Modelry Labs",
+      line2: "Developer Education",
       city: "Remote",
       state: "NA",
       postalCode: "00000",
@@ -28,24 +29,24 @@ export const siteConfig = {
   },
   email: {
     from: {
-      name: "AI Chat App v1",
-      address: "noreply@aichat.local",
+      name: "Modelry",
+      address: "noreply@modelry.app",
     },
     support: {
-      name: "AI Chat App v1 Support",
-      address: "support@aichat.local",
+      name: "Modelry Support",
+      address: "support@modelry.app",
     },
-    replyTo: "support@aichat.local",
+    replyTo: "support@modelry.app",
     footer: {
-      company: "AI Chat App v1",
-      address: "Starter Workspace, Remote, Internet",
-      unsubscribe: "Starter emails are only here to support authentication flows.",
+      company: "Modelry",
+      address: "Modelry Labs, Remote, Internet",
+      unsubscribe: "Transactional emails for your Modelry account.",
       privacy: "Privacy",
       terms: "Terms",
     },
   },
   colors: {
-    primary: "#2563eb",
+    primary: "#152238",
     secondary: "#0f172a",
     success: "#16a34a",
     warning: "#d97706",
@@ -56,14 +57,15 @@ export const siteConfig = {
     textMuted: "#64748b",
   },
   legal: {
-    companyName: "AI Chat App v1",
+    companyName: "Modelry",
     taxId: "starter",
-    lastUpdated: "March 2026",
+    lastUpdated: "October 2026",
   },
 };
 
 export const site = {
   name: siteConfig.name,
+  tagline: siteConfig.tagline,
   address: `${siteConfig.contact.address.line1}, ${siteConfig.contact.address.city}, ${siteConfig.contact.address.state} ${siteConfig.contact.address.postalCode}`,
   phone: siteConfig.contact.phone,
   email: siteConfig.contact.email,

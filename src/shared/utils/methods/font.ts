@@ -9,8 +9,8 @@ const font = Font({
 
 const viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#000000" },
+    { media: "(prefers-color-scheme: light)", color: "#152238" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f172a" },
   ],
   width: "device-width",
   initialScale: 1,
