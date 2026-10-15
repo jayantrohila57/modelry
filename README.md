@@ -1,156 +1,114 @@
-# Modelry
+<p align="center">
+  <img src="public/logo.png" alt="Modelry logo" width="96" height="96" />
+</p>
 
-**See what happens inside AI.**
+<h1 align="center">Modelry</h1>
 
-Modelry is an interactive AI laboratory where developers experiment with language models, understand their behavior, and learn how AI-powered software actually works. Built on Next.js App Router, tRPC, Better Auth, Drizzle, and Neon.
+<p align="center"><strong>See what happens inside AI.</strong></p>
 
-## What is implemented
+<p align="center">
+  <a href="https://modelry.vercel.app">Live app: modelry.vercel.app</a>
+</p>
 
-- Public-user auth now defaults new signups to the `customer` role.
-- The backend data model now includes:
-  - `chat_thread`
-  - `chat_message`
-  - `chat_attachment`
-  - `credit_wallet`
-  - `credit_ledger`
-  - `usage_event`
-  - `subscription_plan`
-  - `subscription`
-  - `payment_event`
-  - `background_job_run`
-- tRPC routers now include:
-  - `viewer`
-  - `chat`
-  - `credits`
-  - `billing`
-  - `attachments`
-  - `analytics`
-- The `/api/ai/chat` route is now authenticated, thread-aware, credit-aware, and persistence-ready.
-- Arcjet protection covers the `/api/ai/chat` route, upload route, and tRPC mutation surface.
-- Starter credits are granted idempotently on first authenticated usage/session hydration.
+Modelry is an interactive AI laboratory where developers experiment with language models, understand their behavior, and learn how AI-powered software actually works.
 
-## Current backend flow
+## Features
 
-1. User signs in with Better Auth.
-2. A wallet is created automatically if it does not exist.
-3. Starter credits are granted once through the credit ledger.
-4. A chat thread is created on demand or an existing owned thread is reused.
-5. The latest user message is persisted.
-6. Credits are reserved before the model call starts.
-7. The assistant placeholder message is created.
-8. The AI route streams a response from Ollama.
-9. When the stream finishes, the assistant message is finalized and credit settlement is recorded.
-10. Usage analytics are written for chat lifecycle events.
+- **Streaming AI chat**: an authenticated, thread-aware `/api/ai/chat` route built on the Vercel AI SDK, with Ollama for local models and Google Gemini support.
+- **Threads and history**: create, rename, delete and revisit chat threads (`/chat`, `/chat/[threadId]`).
+- **Credits system**: a wallet plus ledger, starter credits granted once, credit reservation before each model call and settlement after it.
+- **Auth**: Better Auth with email/password, GitHub OAuth and email verification through Resend.
+- **Attachments**: file uploads to Vercel Blob, with size and count limits you can configure.
+- **Billing scaffolding**: subscription plans, subscriptions and payment events (Razorpay).
+- **Usage analytics**: chat lifecycle events and usage summaries.
+- **Security**: Arcjet protection on the chat, upload and tRPC mutation routes.
+- **Studio and account**: `/studio` workspace for staff and admins, `/account` for profile and security.
 
-## Routes and API surface
+## Tech stack
 
-### App routes
+| Area | Tools |
+| --- | --- |
+| Framework | Next.js 16 (App Router), React 19, TypeScript |
+| API | tRPC 11, TanStack Query, superjson, Zod |
+| AI | Vercel AI SDK (`ai`, `@ai-sdk/react`, `@ai-sdk/google`), `ollama-ai-provider-v2`, Streamdown, Shiki |
+| Auth | Better Auth |
+| Database | Neon Postgres, Drizzle ORM, drizzle-kit |
+| UI | Tailwind CSS 4, shadcn/ui, Radix UI, lucide-react, Motion, GSAP, Recharts |
+| Email | Resend, React Email |
+| Storage | Vercel Blob |
+| Security | Arcjet |
+| Tooling | pnpm, Biome, Husky, `@t3-oss/env-nextjs` |
 
-- `/chat`
-- `/chat/[threadId]`
-- `/studio` for internal staff/admin workspace
-- `/account` for profile/security and future billing surfaces
+## Getting started
 
-### API routes
+### Prerequisites
 
-- `/api/ai/chat`
-- `/api/v1/trpc/*` through the app router
+- Node.js 20+
+- pnpm
+- A Postgres database (for example [Neon](https://neon.tech))
+- [Ollama](https://ollama.com) if you want to run models locally
 
-### tRPC namespaces
+### Setup
 
-- `viewer.session`
-- `chat.list`
-- `chat.get`
-- `chat.create`
-- `chat.rename`
-- `chat.delete`
-- `credits.wallet`
-- `credits.ledger`
-- `billing.plans`
-- `billing.subscription`
-- `billing.payments`
-- `attachments.finalize`
-- `attachments.byThread`
-- `attachments.delete`
-- `analytics.summary`
+```bash
+git clone https://github.com/jayantrohila57/modelry.git
+cd modelry
+pnpm install
+cp .env.example .env.local   # then fill in the values
+ollama pull qwen3.5:0.8b     # default local model
+pnpm db:migrate              # or: pnpm db:push
+pnpm dev
+```
+
+Open http://localhost:3000, sign in, and go to `/chat`.
 
 ## Environment variables
 
-Copy `.env.example` to `.env.local` and fill in real values.
+Copy `.env.example` to `.env.local`. The variables are validated in `src/shared/config/env.server.ts` and `src/shared/config/env.client.ts`.
 
-### Core
+| Group | Variables |
+| --- | --- |
+| Auth | `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL` |
+| App URLs | `NEXT_PUBLIC_BASE_URL`, `NEXT_PUBLIC_API_URL` |
+| Database | `DATABASE_URL` |
+| Email | `RESEND_API_KEY`, `RESEND_FROM_EMAIL` |
+| OAuth | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` |
+| AI | `AI_PROVIDER`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL` |
+| Optional | `ARKJET_API_KEY`, `BLOB_READ_WRITE_TOKEN`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `NEXT_PUBLIC_RAZORPAY_KEY_ID` |
 
-- `NODE_ENV`
-- `PORT`
-- `NEXT_PUBLIC_BASE_URL`
-- `NEXT_PUBLIC_API_URL`
-- `VERCEL_URL`
-- `USE_DEBUG_LOGS`
+Optional limits (they have defaults): `STARTER_CREDITS`, `CHAT_RESERVE_MIN_CREDITS`, `CHAT_RESERVE_RATIO`, `SUBSCRIPTION_MONTHLY_CREDITS`, `MAX_UPLOAD_FILE_SIZE_BYTES`, `MAX_UPLOAD_FILES_PER_MESSAGE`.
 
-### Auth
+## Scripts
 
-- `BETTER_AUTH_SECRET`
-- `BETTER_AUTH_URL`
-- `GITHUB_CLIENT_ID`
-- `GITHUB_CLIENT_SECRET`
-- `RESEND_API_KEY`
-- `RESEND_FROM_EMAIL`
+| Script | What it does |
+| --- | --- |
+| `pnpm dev` | Clear `.next` and start the dev server |
+| `pnpm build` / `pnpm start` | Production build and serve |
+| `pnpm typecheck` | `tsc --noEmit` |
+| `pnpm lint` / `pnpm lint:fix` | Biome lint |
+| `pnpm format` / `pnpm format:check` | Biome format |
+| `pnpm check` | Biome check plus typecheck |
+| `pnpm db:generate` / `db:migrate` / `db:push` / `db:studio` | Drizzle migrations and studio |
+| `pnpm db:introspect` / `db:drop` / `db:reset` | Drizzle maintenance |
+| `pnpm auth:generate` / `auth:migrate` | Better Auth schema |
+| `pnpm email:dev` | React Email preview |
+| `pnpm starter:smoke` | Starter-credits smoke test |
 
-### Database and storage
+## Project structure
 
-- `DATABASE_URL`
-- `BLOB_READ_WRITE_TOKEN`
+```
+.
+├── migrations/          # Drizzle SQL migrations
+├── public/              # Static assets (logo.png, icon.svg)
+├── scripts/             # Smoke tests
+└── src/
+    ├── app/             # Next.js routes: (site) pages, api/, layout, manifest
+    ├── core/            # api (tRPC), auth, db, mail, query, theme
+    ├── module/          # Features: account, ai, analytics, attachments, auth,
+    │                    #   billing, chat, credits, system, viewer
+    └── shared/          # components, config (env), schema, styles, types, utils
+```
 
-### Security
+## License
 
-- `ARKJET_API_KEY`
-
-### AI
-
-- `AI_PROVIDER`
-- `OLLAMA_BASE_URL`
-- `OLLAMA_MODEL`
-
-### Credits
-
-- `STARTER_CREDITS`
-- `CHAT_RESERVE_MIN_CREDITS`
-- `CHAT_RESERVE_RATIO`
-- `SUBSCRIPTION_MONTHLY_CREDITS`
-
-### Uploads
-
-- `MAX_UPLOAD_FILE_SIZE_BYTES`
-- `MAX_UPLOAD_FILES_PER_MESSAGE`
-
-### Billing and jobs
-
-- `RAZORPAY_KEY_ID`
-- `RAZORPAY_KEY_SECRET`
-- `RAZORPAY_WEBHOOK_SECRET`
-- `INNGEST_EVENT_KEY`
-- `INNGEST_SIGNING_KEY`
-
-## Local development
-
-1. Install dependencies.
-2. Start Neon/Postgres and set `DATABASE_URL`.
-3. Run Ollama locally and pull the configured model.
-4. Generate and run Drizzle migrations for the new schema.
-5. Start the Next.js app.
-6. Sign in and open `/chat`.
-
-## Important notes
-
-- The schema is implemented in code, but you still need to generate and apply Drizzle migrations for a real database.
-- Billing, webhooks, Inngest jobs, and production provider switching are scaffolded at the API/domain level but intentionally not fully integrated yet.
-- The current token accounting uses a lightweight estimator so the backend contract is in place before the dedicated tokenizer package is introduced.
-
-## Suggested next backend steps
-
-1. Generate and apply migrations for the new tables.
-2. Connect the `/chat` UI to `chat.*` and `viewer.session` instead of mock state.
-3. Add real file-upload finalization from the chat composer.
-4. Replace token estimation with `gpt-tokenizer`.
-5. Implement Razorpay checkout and webhook handling.
-6. Add Inngest jobs for refill cycles, recalculation, and aggregation.
+No license file has been added yet, so all rights are reserved by the author. Add a `LICENSE` file to change this.
