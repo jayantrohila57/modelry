@@ -112,3 +112,9 @@ Optional limits (they have defaults): `STARTER_CREDITS`, `CHAT_RESERVE_MIN_CREDI
 ## License
 
 No license file has been added yet, so all rights are reserved by the author. Add a `LICENSE` file to change this.
+
+## Sponsor
+
+If you find this project useful, consider supporting its development:
+
+[![Sponsor](https://img.shields.io/badge/Sponsor-%E2%9D%A4-db61a2?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/jayantrohila57)
