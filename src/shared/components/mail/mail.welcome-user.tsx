@@ -16,12 +16,9 @@ export const WelcomeEmail = ({ name }: WelcomeEmailProps) => (
           <Text style={emailStyles.heading}>Welcome to {siteConfig.name}!</Text>
           <Text style={emailStyles.text}>{emailContent.greeting(name)}</Text>
           <Text style={emailStyles.text}>
-            Thank you for signing up with {siteConfig.name}! We're thrilled to have you join our community of smart
-            shoppers.
+            Thank you for joining {siteConfig.name}! {siteConfig.tagline}
           </Text>
-          <Text style={emailStyles.text}>
-            Discover amazing products, exclusive deals, and a seamless shopping experience designed just for you.
-          </Text>
+          <Text style={emailStyles.text}>{siteConfig.description}</Text>
           <Text style={emailStyles.text}>{emailContent.signOff()}</Text>
         </Section>
 

@@ -386,7 +386,7 @@ async function openCheckoutFlow(input: {
     subscription_id: input.payload.providerSubscriptionId,
     name: "Modelry",
     description: `${input.payload.planName} monthly subscription`,
-    image: "/logo.png",
+    image: "/icon.svg",
     handler: input.onSuccess,
     modal: {
       ondismiss: () => {

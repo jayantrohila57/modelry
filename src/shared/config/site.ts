@@ -1,11 +1,28 @@
+import type { Metadata } from "next";
 import { clientEnv } from "./env.client";
+
+function resolveBaseUrl() {
+  const configured = clientEnv.NEXT_PUBLIC_BASE_URL;
+  if (configured && configured !== "undefined") {
+    return configured;
+  }
+  return "http://localhost:3000";
+}
+
+const baseUrl = resolveBaseUrl();
+
+const description =
+  "Modelry is an interactive AI laboratory where developers experiment with language models, understand their behavior, and learn how AI-powered software actually works.";
 
 export const siteConfig = {
   name: "Modelry",
+  wordmark: "modelry",
   tagline: "See what happens inside AI.",
   domain: "modelry.app",
-  description:
-    "Modelry is an interactive AI laboratory where developers experiment with language models, understand their behavior, and learn how AI-powered software actually works.",
+  description,
+  brand: {
+    navy: "#172554",
+  },
   contact: {
     email: "support@modelry.app",
     supportEmail: "support@modelry.app",
@@ -21,11 +38,11 @@ export const siteConfig = {
     },
   },
   urls: {
-    base: clientEnv.NEXT_PUBLIC_BASE_URL,
-    website: clientEnv.NEXT_PUBLIC_BASE_URL,
-    support: `${clientEnv.NEXT_PUBLIC_BASE_URL}/auth`,
-    privacy: `${clientEnv.NEXT_PUBLIC_BASE_URL}/privacy`,
-    terms: `${clientEnv.NEXT_PUBLIC_BASE_URL}/terms`,
+    base: baseUrl,
+    website: baseUrl,
+    support: `${baseUrl}/auth`,
+    privacy: `${baseUrl}/privacy`,
+    terms: `${baseUrl}/terms`,
   },
   email: {
     from: {
@@ -65,16 +82,40 @@ export const siteConfig = {
 
 export const site = {
   name: siteConfig.name,
+  wordmark: siteConfig.wordmark,
   tagline: siteConfig.tagline,
   address: `${siteConfig.contact.address.line1}, ${siteConfig.contact.address.city}, ${siteConfig.contact.address.state} ${siteConfig.contact.address.postalCode}`,
   phone: siteConfig.contact.phone,
   email: siteConfig.contact.email,
   description: siteConfig.description,
-  url: clientEnv.NEXT_PUBLIC_BASE_URL,
+  url: baseUrl,
   legalUpdate: siteConfig.legal.lastUpdated,
   apiTitle: `${siteConfig.name} API`,
   apiVersion: "1.0.0",
   socialLinks: [],
+};
+
+export const siteMetadata: Metadata = {
+  metadataBase: new URL(baseUrl),
+  title: {
+    default: siteConfig.name,
+    template: `%s | ${siteConfig.name}`,
+  },
+  description: siteConfig.description,
+  applicationName: siteConfig.name,
+  openGraph: {
+    type: "website",
+    locale: "en_US",
+    url: baseUrl,
+    siteName: siteConfig.name,
+    title: siteConfig.name,
+    description: siteConfig.description,
+  },
+  twitter: {
+    card: "summary",
+    title: siteConfig.name,
+    description: siteConfig.description,
+  },
 };
 
 export type SiteConfig = typeof siteConfig;

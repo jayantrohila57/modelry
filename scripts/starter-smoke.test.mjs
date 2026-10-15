@@ -6,7 +6,8 @@ const siteSource = readFileSync(new URL("../src/shared/config/site.ts", import.m
 const apiRoutesSource = readFileSync(new URL("../src/core/api/api.routes.ts", import.meta.url), "utf8");
 
 assert.match(siteSource, /name:\s*"Modelry"/);
-assert.match(siteSource, /description:\s*"[^"]*interactive AI laboratory[^"]*"/i);
+assert.match(siteSource, /tagline:\s*"See what happens inside AI\."/);
+assert.match(siteSource, /interactive AI laboratory/i);
 
 assert.match(routesSource, /ROOT:\s*"\/"/);
 assert.match(routesSource, /AUTH:\s*\{/);

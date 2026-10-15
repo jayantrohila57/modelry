@@ -4,6 +4,7 @@ import { Layers, LogIn } from "lucide-react";
 import Link from "next/link";
 import { useSession } from "@/core/auth/auth.client";
 import { BrandLogo } from "@/shared/components/layout/brand/brand-logo";
+import { siteConfig } from "@/shared/config/site";
 import { Separator } from "../../ui/separator";
 import {
   Sidebar,
@@ -31,7 +32,8 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" className="group">
               <div
-                className="hidden aspect-square size-8 items-center justify-center rounded-lg bg-[#152238] text-white group-data-[collapsible=icon]:flex dark:bg-[#1e3a5f]"
+                className="hidden aspect-square size-8 items-center justify-center rounded-lg text-white group-data-[collapsible=icon]:flex"
+                style={{ backgroundColor: siteConfig.brand.navy }}
                 aria-hidden
               >
                 <Layers className="size-4 stroke-[2.25]" />

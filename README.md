@@ -26,7 +26,7 @@ Modelry is an interactive AI laboratory where developers experiment with languag
   - `attachments`
   - `analytics`
 - The `/api/ai/chat` route is now authenticated, thread-aware, credit-aware, and persistence-ready.
-- Arcjet protection now covers the AI chat route, upload route, and tRPC mutation surface.
+- Arcjet protection covers the `/api/ai/chat` route, upload route, and tRPC mutation surface.
 - Starter credits are granted idempotently on first authenticated usage/session hydration.
 
 ## Current backend flow
@@ -154,4 +154,3 @@ Copy `.env.example` to `.env.local` and fill in real values.
 4. Replace token estimation with `gpt-tokenizer`.
 5. Implement Razorpay checkout and webhook handling.
 6. Add Inngest jobs for refill cycles, recalculation, and aggregation.
-

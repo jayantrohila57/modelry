@@ -38,16 +38,14 @@ export function BrandLogo({ className, href, showTagline = false, size = "md" }:
   const content = (
     <div className={cn("flex min-w-0 items-center gap-2.5", className)}>
       <div
-        className={cn(
-          "flex shrink-0 items-center justify-center bg-[#152238] text-white shadow-sm dark:bg-[#1e3a5f]",
-          styles.mark,
-        )}
+        className={cn("flex shrink-0 items-center justify-center text-white shadow-sm", styles.mark)}
+        style={{ backgroundColor: siteConfig.brand.navy }}
         aria-hidden
       >
         <Layers className={cn(styles.icon, "stroke-[2.25]")} />
       </div>
       <div className="grid min-w-0 flex-1 text-left leading-tight">
-        <span className={cn("truncate", styles.title)}>{site.name}</span>
+        <span className={cn("truncate lowercase tracking-tight", styles.title)}>{site.wordmark}</span>
         {showTagline ? (
           <span className={cn("truncate font-normal text-muted-foreground", styles.tagline)}>{siteConfig.tagline}</span>
         ) : null}
