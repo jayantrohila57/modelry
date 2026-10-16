@@ -12,6 +12,10 @@
 
 Modelry is an interactive AI laboratory where developers experiment with language models, understand their behavior, and learn how AI-powered software actually works.
 
+## Try it
+
+Open [modelry.vercel.app](https://modelry.vercel.app), create an account (email/password or GitHub), and go to `/chat`. New accounts get starter credits once (default `STARTER_CREDITS=50000`).
+
 ## Features
 
 - **Streaming AI chat**: an authenticated, thread-aware `/api/ai/chat` route built on the Vercel AI SDK, with Ollama for local models and Google Gemini support.
@@ -76,6 +80,17 @@ Copy `.env.example` to `.env.local`. The variables are validated in `src/shared/
 | AI | `AI_PROVIDER`, `OLLAMA_BASE_URL`, `OLLAMA_MODEL` |
 | Optional | `ARKJET_API_KEY`, `BLOB_READ_WRITE_TOKEN`, `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `NEXT_PUBLIC_RAZORPAY_KEY_ID` |
 
+### AI provider
+
+`AI_PROVIDER` picks the model backend in `src/module/ai/ai.provider.ts`. Only two values are supported; anything else throws `Unsupported AI provider`.
+
+- `ollama` (default): uses `OLLAMA_BASE_URL` (default `http://127.0.0.1:11434/api`) and `OLLAMA_MODEL` (default `qwen3.5:0.8b`).
+- `google`: uses `@ai-sdk/google`. That SDK reads its key from `GOOGLE_GENERATIVE_AI_API_KEY`, which is not listed in `.env.example`.
+
+### Credits
+
+Defaults come from `src/shared/config/env.server.ts`: `STARTER_CREDITS=50000` granted once per user, `CHAT_RESERVE_MIN_CREDITS=256` and `CHAT_RESERVE_RATIO=2` for the reservation made before each model call, and `SUBSCRIPTION_MONTHLY_CREDITS=250000`. Razorpay plans use `RAZORPAY_STARTER_PLAN_ID` and `RAZORPAY_PRO_PLAN_ID`.
+
 Optional limits (they have defaults): `STARTER_CREDITS`, `CHAT_RESERVE_MIN_CREDITS`, `CHAT_RESERVE_RATIO`, `SUBSCRIPTION_MONTHLY_CREDITS`, `MAX_UPLOAD_FILE_SIZE_BYTES`, `MAX_UPLOAD_FILES_PER_MESSAGE`.
 
 ## Scripts
@@ -111,7 +126,7 @@ Optional limits (they have defaults): `STARTER_CREDITS`, `CHAT_RESERVE_MIN_CREDI
 
 ## License
 
-No license file has been added yet, so all rights are reserved by the author. Add a `LICENSE` file to change this.
+[MIT](LICENSE) © 2026 Jayant Rohila
 
 ## Sponsor
 
