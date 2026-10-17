@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="public/logo.png" alt="Modelry logo" width="96" height="96" />
-</p>
+<p align="center"><img src=".github/brand/readme-banner.png" alt="Modelry: See what happens inside AI." width="100%" /></p>
 
 <h1 align="center">Modelry</h1>
 
@@ -123,6 +121,24 @@ Optional limits (they have defaults): `STARTER_CREDITS`, `CHAT_RESERVE_MIN_CREDI
     │                    #   billing, chat, credits, system, viewer
     └── shared/          # components, config (env), schema, styles, types, utils
 ```
+
+## Brand
+
+<img src=".github/brand/logo-lockup-on-light.png#gh-light-mode-only" alt="Modelry logo" height="56" /><img src=".github/brand/logo-lockup-on-dark.png#gh-dark-mode-only" alt="Modelry logo" height="56" />
+
+**See what happens inside AI.**
+
+Brand assets live in [`.github/brand`](.github/brand): logo mark (SVG and PNG), wordmark (SVG), light and dark lockups, app icons (512, 192 and 32 px), an Open Graph image (1200×630), a GitHub social preview (1280×640), this README banner, an X/LinkedIn banner (1500×500) and a palette sheet.
+
+| Role | Hex | Source |
+| --- | --- | --- |
+| Brand navy (mark, theme-color) | `#172554` | `siteConfig.brand.navy` |
+| Primary (light) | `#1447e6` | `--primary` |
+| Primary (dark) | `#193cb8` | `--primary (dark)` |
+| Primary foreground | `#eff6ff` | `--primary-foreground` |
+| Email primary | `#152238` | `siteConfig.colors.primary` |
+
+Type: Figtree (from `src/shared/utils/methods/font.ts`). The wordmark is lowercase `modelry`.
 
 ## License
 
