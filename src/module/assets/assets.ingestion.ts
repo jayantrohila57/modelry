@@ -152,8 +152,9 @@ export async function processAsset(userId: string, assetId: string) {
   }
 }
 
-export async function findRelevantAssetChunks(input: { userId: string; query: string; limit?: number }) {
-  const query = input.query.trim();
+export async function findRelevantAssetChunks(input: { userId: string; query: string; limit?: number; assetIds?: string[] }) {
+  const assetIds = [...new Set(input.assetIds ?? [])];
+  const query = input.query.trim() || (assetIds.length ? "Summarize the uploaded documents" : "");
   if (!query) return [];
   const hasReadyAssets = await db.query.chatAttachment.findFirst({
     where: and(
@@ -166,9 +167,26 @@ export async function findRelevantAssetChunks(input: { userId: string; query: st
   if (!hasReadyAssets) return [];
   const embeddings = await createEmbeddings([query]);
   const vector = `[${embeddings[0]!.join(",")}]`;
+  if (assetIds.length) {
+    const results = await Promise.all(assetIds.map(async (assetId) => {
+      const result = await db.execute(sql`
+        select c.asset_id as "assetId", a.name as "name", c.content as "content",
+          1 - (c.embedding <=> ${vector}::vector) as "similarity", true as "explicitlyAttached"
+        from asset_chunk c
+        inner join chat_attachment a on a.id = c.asset_id
+        where c.asset_id = ${assetId} and c.user_id = ${input.userId} and a.user_id = ${input.userId}
+          and a.status <> 'deleted' and a.processing_status = 'ready'
+        order by c.embedding <=> ${vector}::vector
+        limit 3
+      `);
+      return result.rows as Array<{ assetId: string; name: string; content: string; similarity: number; explicitlyAttached: boolean }>;
+    }));
+    return results.flat();
+  }
+
   const result = await db.execute(sql`
     select c.asset_id as "assetId", a.name as "name", c.content as "content",
-      1 - (c.embedding <=> ${vector}::vector) as "similarity"
+      1 - (c.embedding <=> ${vector}::vector) as "similarity", false as "explicitlyAttached"
     from asset_chunk c
     inner join chat_attachment a on a.id = c.asset_id
     where c.user_id = ${input.userId} and a.user_id = ${input.userId}
@@ -176,5 +194,5 @@ export async function findRelevantAssetChunks(input: { userId: string; query: st
     order by c.embedding <=> ${vector}::vector
     limit ${input.limit ?? 6}
   `);
-  return result.rows as Array<{ assetId: string; name: string; content: string; similarity: number }>;
+  return result.rows as Array<{ assetId: string; name: string; content: string; similarity: number; explicitlyAttached: boolean }>;
 }

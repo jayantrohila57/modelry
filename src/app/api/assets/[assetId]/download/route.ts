@@ -1,5 +1,6 @@
 import { get } from "@vercel/blob";
 import { getServerSession } from "@/core/auth/auth.server";
+import { getAssetContentDisposition } from "@/module/assets/assets.domain";
 import { getAssetForUser } from "@/module/assets/assets.service";
 import { jsonFailure } from "@/shared/config/api.utils";
 
@@ -22,12 +23,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ass
       return jsonFailure({ message: "File is no longer available", code: "NOT_FOUND", kind: "not_found", httpStatus: 404 });
     }
 
-    const safeName = asset.name.replace(/[\r\n"\\]/g, "_");
     const disposition = asset.fileType === "html" ? "attachment" : "inline";
     return new Response(blob.stream, {
       headers: {
         "Content-Type": asset.mimeType,
-        "Content-Disposition": `${disposition}; filename="${safeName}"`,
+        "Content-Disposition": getAssetContentDisposition(asset.name, disposition),
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
       },

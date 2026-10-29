@@ -84,10 +84,26 @@ export async function uploadAndProcessAsset(input: {
     }),
   );
 
-  const processRequest = fetch(`/api/assets/${assetId}/process`, { method: "POST" });
+  let processError: Error | undefined;
+  const processRequest = fetch(`/api/assets/${assetId}/process`, {
+    method: "POST",
+    signal: AbortSignal.timeout(305_000),
+  }).then(async (response) => {
+    if (response.ok) return;
+    const body = (await response.json().catch(() => ({}))) as { message?: string };
+    throw new Error(body.message || "Document analysis failed.");
+  }).catch((error: unknown) => {
+    processError = error instanceof Error ? error : new Error("Document analysis failed.");
+  });
   let completed: AssetStatusResponse["data"] | undefined;
+  const deadline = Date.now() + 305_000;
   while (!completed) {
-    const response = await fetch(`/api/assets/${assetId}/status`, { cache: "no-store" });
+    if (processError) throw processError;
+    if (Date.now() >= deadline) throw new Error("Document analysis timed out. Try again from the Assets page.");
+    const response = await fetch(`/api/assets/${assetId}/status`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(10_000),
+    });
     const body = (await response.json()) as AssetStatusResponse;
     const asset = body.data;
     if (!response.ok || !asset) throw new Error(body.message || "Unable to check document analysis status.");
@@ -103,11 +119,8 @@ export async function uploadAndProcessAsset(input: {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
-  const processResponse = await processRequest;
-  if (!processResponse.ok) {
-    const body = (await processResponse.json().catch(() => ({}))) as { message?: string };
-    throw new Error(body.message || "Document analysis failed.");
-  }
+  await processRequest;
+  if (processError) throw processError;
   input.onProgress({ stage: "ready", progress: 100, message: stageMessage.ready });
   return { assetId, name: completed.name, summary: completed.summary };
 }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAssetPathname, getAssetFileType, getProcessingProgress, isAssetPathOwnedByUser, splitTextIntoChunks, validateAssetUpload } from "./assets.domain";
+import { buildAssetPathname, getAssetContentDisposition, getAssetFileType, getProcessingProgress, isAssetPathOwnedByUser, splitTextIntoChunks, validateAssetUpload } from "./assets.domain";
 
 test("asset upload validation accepts supported text-bearing document types", () => {
   assert.deepEqual(
@@ -31,6 +31,13 @@ test("asset blob paths are scoped to the owning user", () => {
   assert.equal(isAssetPathOwnedByUser(pathname, "user-123"), true);
   assert.equal(isAssetPathOwnedByUser("assets/user-456/00000000-0000-4000-8000-000000000001.pdf", "user-123"), false);
   assert.equal(isAssetPathOwnedByUser("assets/user-123/../user-456/file.pdf", "user-123"), false);
+});
+
+test("download headers preserve Unicode filenames with an ASCII fallback", () => {
+  assert.equal(
+    getAssetContentDisposition("研究报告.pdf", "attachment"),
+    "attachment; filename=\"____.pdf\"; filename*=UTF-8''%E7%A0%94%E7%A9%B6%E6%8A%A5%E5%91%8A.pdf",
+  );
 });
 
 test("text chunking preserves all text and overlaps chunk boundaries", () => {

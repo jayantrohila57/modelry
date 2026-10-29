@@ -61,6 +61,15 @@ export function getAssetFileType(name: string): AssetFileType {
     : "other";
 }
 
+function encodeHeaderFilename(value: string) {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+export function getAssetContentDisposition(name: string, disposition: "inline" | "attachment") {
+  const fallback = name.normalize("NFKD").replace(/[^\x20-\x7E]|[\\";\r\n]/g, "_") || "download";
+  return `${disposition}; filename="${fallback}"; filename*=UTF-8''${encodeHeaderFilename(name)}`;
+}
+
 export function validateAssetUpload(input: {
   name: string;
   mimeType: string;
