@@ -107,6 +107,12 @@ Optional limits (they have defaults): `STARTER_CREDITS`, `CHAT_RESERVE_MIN_CREDI
 | `pnpm email:dev` | React Email preview |
 | `pnpm starter:smoke` | Starter-credits smoke test |
 
+## Releases
+
+Releases use [Conventional Commits](https://www.conventionalcommits.org/). Pull request titles are checked for a type such as `feat:`, `fix:`, `perf:`, `docs:` or `chore:`. Add `!` for a breaking change, for example `feat!: replace the chat API`.
+
+When changes land on `main`, Release Please opens or updates a release pull request. Review and merge it to publish a GitHub Release, create a `vX.Y.Z` tag, update `package.json`, and maintain `CHANGELOG.md`. Version bumps follow SemVer: `fix` is patch, `feat` is minor, and breaking changes are major. This project is a private web app; releases do not publish an npm package. Vercel deployment behavior remains controlled by the Vercel project integration.
+
 ## Project structure
 
 ```

@@ -1,7 +1,7 @@
 "use client";
 
 import { Minus, Plus } from "lucide-react";
-import { z } from "zod";
+import { z } from "zod/v3";
 import { FormItem } from "@/shared/components/common/form";
 import { Button } from "@/shared/components/ui/button";
 import { debugLog } from "@/shared/utils/lib/logger.utils";
