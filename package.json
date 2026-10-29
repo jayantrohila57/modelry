@@ -2,6 +2,9 @@
   "name": "modelry",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "prepare": "husky",
     "dev": "rimraf .next && next dev",
@@ -23,7 +26,8 @@
     "format:check": "biome format .",
     "check": "biome check . && pnpm run typecheck",
     "email:dev": "react-email dev",
-    "starter:smoke": "node scripts/starter-smoke.test.mjs"
+    "starter:smoke": "node scripts/starter-smoke.test.mjs",
+    "test": "NODE_OPTIONS=--conditions=react-server tsx --test src/module/assets/assets.domain.test.ts src/module/chat/chat-management.test.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.108",
@@ -65,6 +69,7 @@
     "nanoid": "^6.0.2",
     "next": "16.4.3",
     "next-themes": "0.4.6",
+    "officeparser": "^8.4.0",
     "ollama-ai-provider-v2": "^4.1.0",
     "radix-ui": "^1.8.1",
     "react": "19.3.1",

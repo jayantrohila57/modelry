@@ -19,6 +19,8 @@ export const serverEnv = {
   AI_PROVIDER: process.env.AI_PROVIDER ?? "ollama",
   OLLAMA_BASE_URL: process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434/api",
   OLLAMA_MODEL: process.env.OLLAMA_MODEL ?? "qwen3.5:0.8b",
+  ASSET_EMBEDDING_MODEL:
+    process.env.ASSET_EMBEDDING_MODEL ?? (process.env.AI_PROVIDER === "google" ? "gemini-embedding-001" : "nomic-embed-text"),
   STARTER_CREDITS: Number(process.env.STARTER_CREDITS ?? 50000),
   CHAT_RESERVE_MIN_CREDITS: Number(process.env.CHAT_RESERVE_MIN_CREDITS ?? 256),
   CHAT_RESERVE_RATIO: Number(process.env.CHAT_RESERVE_RATIO ?? 2),

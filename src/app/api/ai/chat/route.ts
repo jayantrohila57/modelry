@@ -5,6 +5,8 @@ import { checkArcjet } from "@/app/api/auth/[...all]/arkjet.config";
 import { getServerSession } from "@/core/auth/auth.server";
 import { getChatModel } from "@/module/ai/ai.provider";
 import { extractPlainTextFromMessage } from "@/module/ai/ai.tokens";
+import { findRelevantAssetChunks } from "@/module/assets/assets.ingestion";
+import { linkAssetsToThread, validateAssetsForChat } from "@/module/assets/assets.service";
 import { finalizeChatExchange, prepareChatExchange } from "@/module/chat/chat.orchestration";
 import { type ChatReasoningLevel, getReasoningLevelTemperature } from "@/module/chat/chat.runtime";
 import { failAssistantMessage } from "@/module/chat/chat.service";
@@ -23,6 +25,7 @@ const requestSchema = z.object({
   reasoningEnabled: z.boolean().optional(),
   reasoningLevel: z.enum(["low", "medium", "high"]).optional(),
   webSearch: z.boolean().optional(),
+  assetIds: z.array(z.string().uuid()).max(5).optional().default([]),
   messages: z.array(z.custom<UIMessage>()).min(1),
 });
 
@@ -131,7 +134,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const { messages, threadId, model, reasoningEnabled, reasoningLevel, webSearch } = parsed.data;
+    const { messages, threadId, model, reasoningEnabled, reasoningLevel, webSearch, assetIds } = parsed.data;
     const latestUserMessage = [...messages].reverse().find((message) => message.role === "user");
 
     if (!latestUserMessage) {
@@ -143,6 +146,13 @@ export async function POST(req: Request) {
         status: "failed",
       });
     }
+
+    await validateAssetsForChat(user.id, assetIds);
+    const relevantChunks = await findRelevantAssetChunks({
+      userId: user.id,
+      query: extractPlainTextFromMessage(latestUserMessage),
+      limit: 6,
+    });
 
     const prepared = await prepareChatExchange({
       latestUserMessage,
@@ -156,6 +166,24 @@ export async function POST(req: Request) {
       reasoningLevel,
       supportsReasoning: prepared.resolvedModel.supportsReasoning,
     });
+
+    await linkAssetsToThread(user.id, prepared.thread.id, prepared.persistedUserMessage.id, assetIds);
+    const contextUserMessage = [...prepared.context.messages].reverse().find((message) => message.role === "user");
+    if (contextUserMessage && relevantChunks.length) {
+      const documentContext = relevantChunks
+        .filter((chunk) => Number(chunk.similarity) >= 0.2)
+        .map((chunk) => `Source file: ${chunk.name}\nRelevant content:\n${chunk.content}`)
+        .join("\n\n---\n\n");
+      if (documentContext) {
+        contextUserMessage.parts = [
+          ...contextUserMessage.parts,
+          {
+            type: "text",
+            text: `\n\nUse the following user-owned document excerpts when relevant. Name the source file when using a fact, and say when the files do not contain enough information.\n\n${documentContext}`,
+          },
+        ];
+      }
+    }
 
     const usagePromise = {
       current: Promise.resolve<UsageSnapshot>({ inputTokens: 0, outputTokens: 0, totalTokens: 0 }),
