@@ -20,7 +20,6 @@ const nextConfig: NextConfig = {
   experimental: {
     authInterrupts: true,
     typedEnv: true,
-    viewTransition: true,
   },
   typescript: {
     tsconfigPath: "tsconfig.json",

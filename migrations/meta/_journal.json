@@ -15,6 +15,13 @@
       "when": 1774947853905,
       "tag": "0001_classy_menace",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793303839009,
+      "tag": "0002_wild_the_stranger",
+      "breakpoints": true
     }
   ]
 }

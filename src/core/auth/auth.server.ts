@@ -28,7 +28,7 @@ export const getServerUserPermission = async (permission: Permission[]) => {
   const has = await auth.api.userHasPermission({
     headers: await headers(),
     body: {
-      permission: {
+      permissions: {
         user: permission,
       },
     },
