@@ -10,7 +10,9 @@ export function getSafePostSignInCallback(value?: string | string[]): Route {
   try {
     const callback = new URL(candidate, APP_ORIGIN);
     if (callback.origin !== APP_ORIGIN) return PATH.CHAT.ROOT;
-    return `${callback.pathname}${callback.search}${callback.hash}` as Route;
+    const destination = `${callback.pathname}${callback.search}${callback.hash}`;
+    if (destination.startsWith("//")) return PATH.CHAT.ROOT;
+    return destination as Route;
   } catch {
     return PATH.CHAT.ROOT;
   }
