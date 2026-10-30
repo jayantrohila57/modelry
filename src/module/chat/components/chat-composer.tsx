@@ -212,6 +212,8 @@ export function ChatComposer({
   onError,
 }: ChatComposerProps) {
   const controller = usePromptInputController();
+  const isWaitingForResponse = status === "submitted";
+  const canStopGeneration = status === "streaming";
 
   return (
     <div className="w-full">
@@ -401,17 +403,19 @@ export function ChatComposer({
               </PopoverContent>
             </Popover>
             <InputGroupButton
-              aria-label={isSubmitting ? "Stop generation" : "Send message"}
+              aria-label={
+                canStopGeneration ? "Stop generation" : isWaitingForResponse ? "Sending message" : "Send message"
+              }
               className="shrink-0"
-              disabled={!isSubmitting && isSubmitDisabled}
-              onClick={isSubmitting ? onStop : undefined}
+              disabled={isWaitingForResponse || (!isSubmitting && isSubmitDisabled)}
+              onClick={canStopGeneration ? onStop : undefined}
               size="icon-sm"
               type={isSubmitting ? "button" : "submit"}
-              variant={isSubmitting ? "destructive" : "default"}
+              variant={canStopGeneration ? "destructive" : "default"}
             >
-              {status === "submitted" ? (
+              {isWaitingForResponse ? (
                 <Spinner />
-              ) : isSubmitting || status === "streaming" ? (
+              ) : canStopGeneration ? (
                 <SquareIcon className="size-4" />
               ) : (
                 <ArrowUpIcon className="size-4" />
