@@ -1,6 +1,6 @@
 {
   "name": "modelry",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
@@ -27,7 +27,7 @@
     "check": "biome check . && pnpm run typecheck",
     "email:dev": "react-email dev",
     "starter:smoke": "node scripts/starter-smoke.test.mjs",
-    "test": "NODE_OPTIONS=--conditions=react-server tsx --test src/module/assets/assets.domain.test.ts src/module/chat/chat-management.test.ts"
+    "test": "NODE_OPTIONS=--conditions=react-server tsx --test src/module/assets/assets.domain.test.ts src/module/chat/chat-management.test.ts src/module/chat/chat-context.test.ts src/module/chat/thread-draft-store.test.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.108",

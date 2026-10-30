@@ -14,9 +14,9 @@ export const metadata = {
 
 export default async function ChatThreadPage({ params }: { params: Promise<{ threadId: string }> }) {
   const { threadId } = await params;
-  const { session } = await getServerSession();
+  const { session, user } = await getServerSession();
 
-  if (!session) {
+  if (!session || !user) {
     redirect(getSignInDestination(PATH.CHAT.THREAD(threadId)));
   }
 
@@ -40,6 +40,7 @@ export default async function ChatThreadPage({ params }: { params: Promise<{ thr
           title: response.data.thread.title,
           titleSource: response.data.thread.titleSource,
         }}
+        userId={user.id}
       />
     );
   } catch (error) {

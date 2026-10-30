@@ -214,8 +214,8 @@ assert.deepEqual(getThreadDraftSnapshot(landingKey), {
 });
 
 assert.match(getNewChatDestination(), /^\/chat\?new=\d+$/);
-assert.equal(createChatWorkspaceKey("thread-123", false), "thread-123:active");
-assert.equal(createChatWorkspaceKey("thread-123", true), "thread-123:archived");
+assert.equal(createChatWorkspaceKey("thread-123", false), `${threadKey}:active`);
+assert.equal(createChatWorkspaceKey("thread-123", true), `${threadKey}:archived`);
 assert.equal(getSafePostSignInCallback("/chat/all?q=quarterly"), "/chat/all?q=quarterly");
 assert.equal(getSafePostSignInCallback("//attacker.example"), "/chat");
 assert.equal(getSafePostSignInCallback("/safe/..//attacker.example"), "/chat");

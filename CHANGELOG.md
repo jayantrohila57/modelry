@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.3.0](https://github.com/jayantrohila57/modelry/compare/modelry-v0.2.0...modelry-v0.3.0) (2026-10-30)
+
+### Features
+
+* preserve user-scoped chat drafts across refreshes and warn when file contents need to be reattached
+* reject prompts that exceed the selected model context before persisting the new message
+
+### Bug Fixes
+
+* widen restored conversation context messages to accept current AI SDK message parts
+
 ## [0.2.0](https://github.com/jayantrohila57/modelry/compare/modelry-v0.1.0...modelry-v0.2.0) (2026-10-30)
 
 

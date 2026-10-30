@@ -763,17 +763,19 @@ export async function getThreadContextForAssistant(input: {
     const uiMessages = recentMessages.reverse().map((message) => toAssistantContextMessage(message));
     const summary = thread.summary?.trim();
 
+    const messages: UIMessage[] = summary
+      ? [
+          {
+            id: `summary-${thread.id}-${thread.summaryVersion}`,
+            role: "system" as const,
+            parts: [{ type: "text" as const, text: `Conversation summary:\n${summary}` }],
+          },
+          ...uiMessages,
+        ]
+      : uiMessages;
+
     return {
-      messages: summary
-        ? [
-            {
-              id: `summary-${thread.id}-${thread.summaryVersion}`,
-              role: "system" as const,
-              parts: [{ type: "text" as const, text: `Conversation summary:\n${summary}` }],
-            },
-            ...uiMessages,
-          ]
-        : uiMessages,
+      messages,
       summaryVersion: Number(thread.summaryVersion ?? 0),
       thread,
     };

@@ -7,6 +7,8 @@ import {
   estimateCreditReservation,
   estimateTokenCount,
   estimateTokensFromMessages,
+  exceedsChatContextWindow,
+  extractPlainTextFromMessage,
 } from "@/module/ai/ai.tokens";
 import {
   createAssistantPlaceholder,
@@ -23,6 +25,8 @@ import {
   settleReservedCredits,
 } from "@/module/credits/credits.service";
 import { serverEnv } from "@/shared/config/env.server";
+
+export const CHAT_CONTEXT_WINDOW_EXCEEDED_CODE = "CONTEXT_WINDOW_EXCEEDED";
 
 export async function prepareChatExchange(input: {
   latestUserMessage: UIMessage;
@@ -46,18 +50,24 @@ export async function prepareChatExchange(input: {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Web search is currently available for Google models only." });
   }
 
+  if (!input.replay && input.requestMessages.filter((message) => message.role === "user").length === 1) {
+    const initialPromptTokens = addAdditionalPromptContextTokens(
+      estimateTokensFromMessages(input.requestMessages),
+      input.additionalPromptContext ?? "",
+    );
+    if (exceedsChatContextWindow(initialPromptTokens, resolvedModel.contextWindow)) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `${CHAT_CONTEXT_WINDOW_EXCEEDED_CODE}: This prompt is too large for the selected model. Shorten it, remove some attachments, or choose a model with a larger context window.`,
+      });
+    }
+  }
+
   const thread = await ensureThreadForRequest({
     userId: input.userId,
     threadId: input.threadId,
     model: resolvedModel.id,
     latestUserMessage: input.latestUserMessage,
-  });
-
-  const persistedUserMessage = await persistUserMessage({
-    userId: input.userId,
-    threadId: thread.id,
-    message: input.latestUserMessage,
-    model: resolvedModel.id,
   });
 
   const replayState = input.replay
@@ -75,12 +85,29 @@ export async function prepareChatExchange(input: {
     replacementContent: replayState?.replacementContent,
   });
 
+  if (!replayState && !context.messages.some((message) => message.id === input.latestUserMessage.id)) {
+    context.messages.push(input.latestUserMessage);
+  }
+
   const basePromptTokens = Math.max(
-    estimateTokensFromMessages(input.requestMessages),
     estimateTokensFromMessages(context.messages),
-    estimateTokenCount(persistedUserMessage.content),
+    estimateTokenCount(extractPlainTextFromMessage(input.latestUserMessage)),
   );
   const estimatedPromptTokens = addAdditionalPromptContextTokens(basePromptTokens, input.additionalPromptContext ?? "");
+
+  if (exceedsChatContextWindow(estimatedPromptTokens, resolvedModel.contextWindow)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `${CHAT_CONTEXT_WINDOW_EXCEEDED_CODE}: This conversation is too large for the selected model. Start a new chat, shorten the prompt, remove some attachments, or choose a model with a larger context window.`,
+    });
+  }
+
+  const persistedUserMessage = await persistUserMessage({
+    userId: input.userId,
+    threadId: thread.id,
+    message: input.latestUserMessage,
+    model: resolvedModel.id,
+  });
 
   const estimatedCredits = calculateCreditCostFromTokens(estimatedPromptTokens, resolvedModel.creditMultiplierBps);
   const reservedCreditsAmount = estimateCreditReservation(
