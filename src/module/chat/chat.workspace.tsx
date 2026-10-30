@@ -375,6 +375,7 @@ function DraftSync({ draftKey, droppedAttachmentCount = 0 }: { draftKey: string;
         mediaType: file.mediaType,
         type: "file",
         url: file.url,
+        file: file.file,
       })),
       droppedAttachmentCount,
       text: controller.textInput.value,

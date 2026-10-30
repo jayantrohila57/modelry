@@ -26,6 +26,7 @@ class MemoryStorage {
 
 test("drafts survive a reload without persisting attachment bytes and are scoped to the user", () => {
   const storage = new MemoryStorage();
+  const file = new File(["secret-bytes"], "private.pdf", { type: "application/pdf" });
   const userKey = createThreadDraftKey("thread-123", "user-a");
   const otherUserKey = createThreadDraftKey("thread-123", "user-b");
 
@@ -41,6 +42,7 @@ test("drafts survive a reload without persisting attachment bytes and are scoped
           mediaType: "application/pdf",
           type: "file",
           url: "data:application/pdf;base64,secret-bytes",
+          file,
         },
       ],
       text: "  preserve this draft  ",
@@ -56,7 +58,9 @@ test("drafts survive a reload without persisting attachment bytes and are scoped
     droppedAttachmentCount: 1,
     text: "  preserve this draft  ",
   });
-  assert.equal(getThreadDraftSnapshot(userKey, storage)?.attachments.length, 1);
+  const inMemoryDraft = getThreadDraftSnapshot(userKey, storage);
+  assert.equal(inMemoryDraft?.attachments.length, 1);
+  assert.equal(inMemoryDraft?.attachments[0]?.file, file);
   assert.equal(getThreadDraftSnapshot(otherUserKey, storage), undefined);
 
   clearThreadDraftSnapshot(userKey, storage);

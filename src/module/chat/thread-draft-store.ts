@@ -4,6 +4,7 @@ export type DraftAttachmentSnapshot = {
   mediaType: string;
   type: "file";
   url: string;
+  file?: File;
 };
 
 export type ThreadDraftSnapshot = {

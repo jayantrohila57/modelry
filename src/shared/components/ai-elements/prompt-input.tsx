@@ -137,13 +137,15 @@ const captureScreenshot = async (): Promise<File | null> => {
 // ============================================================================
 
 export interface AttachmentsContext {
-  files: (FileUIPart & { id: string })[];
+  files: PromptInputAttachment[];
   add: (files: File[] | FileList) => void;
   remove: (id: string) => void;
   clear: () => void;
   openFileDialog: () => void;
   fileInputRef: RefObject<HTMLInputElement | null>;
 }
+
+export type PromptInputAttachment = FileUIPart & { id: string; file?: File };
 
 export interface TextInputContext {
   value: string;
@@ -184,7 +186,7 @@ const useOptionalProviderAttachments = () => useContext(ProviderAttachmentsConte
 
 export type PromptInputProviderProps = PropsWithChildren<{
   initialInput?: string;
-  initialAttachments?: (FileUIPart & { id: string })[];
+  initialAttachments?: PromptInputAttachment[];
 }>;
 
 /**
@@ -201,7 +203,7 @@ export const PromptInputProvider = ({
   const clearInput = useCallback(() => setTextInput(""), []);
 
   // ----- attachments state (global when wrapped)
-  const [attachmentFiles, setAttachmentFiles] = useState<(FileUIPart & { id: string })[]>(initialAttachments);
+  const [attachmentFiles, setAttachmentFiles] = useState<PromptInputAttachment[]>(initialAttachments);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   // oxlint-disable-next-line eslint(no-empty-function)
   const openRef = useRef<() => void>(() => {});
@@ -220,8 +222,21 @@ export const PromptInputProvider = ({
         mediaType: file.type,
         type: "file" as const,
         url: URL.createObjectURL(file),
+        file,
       })),
     ]);
+  }, []);
+
+  useEffect(() => {
+    setAttachmentFiles((current) => {
+      let changed = false;
+      const restored = current.map((attachment) => {
+        if (!attachment.file || !attachment.url.startsWith("blob:")) return attachment;
+        changed = true;
+        return { ...attachment, url: URL.createObjectURL(attachment.file) };
+      });
+      return changed ? restored : current;
+    });
   }, []);
 
   const remove = useCallback((id: string) => {

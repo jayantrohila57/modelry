@@ -86,7 +86,11 @@ export async function prepareChatExchange(input: {
   });
 
   if (!replayState && !context.messages.some((message) => message.id === input.latestUserMessage.id)) {
-    context.messages.push(input.latestUserMessage);
+    context.messages.push({
+      id: input.latestUserMessage.id,
+      role: "user",
+      parts: [{ type: "text", text: extractPlainTextFromMessage(input.latestUserMessage) }],
+    });
   }
 
   const basePromptTokens = Math.max(
