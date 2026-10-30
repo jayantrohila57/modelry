@@ -29,6 +29,7 @@ import {
 import { AssetFileIcon } from "@/module/assets/asset-file-icon";
 import { AssetUploadSteps } from "@/module/assets/asset-upload-steps";
 import { type AssetUploadProgress, uploadAndProcessAsset } from "@/module/assets/assets.upload";
+import { createChatWorkspaceKey } from "@/module/chat/chat.navigation";
 import {
   Attachment,
   AttachmentPreview,
@@ -678,6 +679,7 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
   const [threadTitle, setThreadTitle] = useState(thread?.title ?? "Untitled chat");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [messageQueue, setMessageQueue] = useState<PromptInputMessage[]>([]);
+  const failedMessageText = useRef<string | null>(null);
   const [assetUploads, setAssetUploads] = useState<
     Array<{ id: string; name: string; sizeBytes: number; progress: AssetUploadProgress }>
   >([]);
@@ -723,10 +725,13 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
     messages: initialUiMessages,
     onError: (nextError) => {
       toast.error(nextError.message || "Failed to send chat message.");
-      // Clear queue on error to prevent stuck messages
-      setMessageQueue([]);
+      if (failedMessageText.current && !controller.textInput.value.trim()) {
+        controller.textInput.setInput(failedMessageText.current);
+      }
+      failedMessageText.current = null;
     },
     onFinish: ({ message }) => {
+      failedMessageText.current = null;
       setAssetUploads([]);
       invalidateThreadLists();
       void utils.viewer.session.invalidate();
@@ -952,6 +957,7 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
     async (message: PromptInputMessage) => {
       if (!message.files.length) {
         const outgoing = message.text.trim() ? { text: message.text.trim() } : { text: "" };
+        failedMessageText.current = message.text;
         controller.textInput.setInput("");
         attachments.clear();
         await sendMessage(outgoing, {
@@ -1032,6 +1038,7 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
         const text =
           message.text.trim() ||
           "Please briefly summarize each uploaded document and call out its main topics and useful details.";
+        failedMessageText.current = text;
         controller.textInput.setInput("");
         attachments.clear();
         setIsUploadingAssets(false);
@@ -1330,6 +1337,22 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
                 </div>
               )}
               <div className="w-full p-2">
+                {status === "error" && controller.textInput.value.trim() ? (
+                  <Alert className="mb-2" variant="destructive">
+                    <AlertTitle>Message wasn’t sent</AlertTitle>
+                    <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+                      <span>Your text is back in the composer. Retry when the connection is ready.</span>
+                      <Button
+                        onClick={() => void handleSend({ files: [], text: controller.textInput.value })}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        Retry message
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
                 <PromptInput globalDrop multiple onSubmit={handleSend}>
                   <PromptInputHeader>
                     <PromptInputAttachmentsDisplay />
@@ -1542,7 +1565,7 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
 export function ChatWorkspace({ mode, thread = null, initialMessages = [] }: ChatWorkspaceProps) {
   const draftKey = createThreadDraftKey(thread?.id ?? null);
   const initialDraft = getThreadDraftSnapshot(draftKey) ?? { attachments: [], text: "" };
-  const workspaceKey = `${draftKey}:${thread?.lastMessageAt?.toISOString?.() ?? "landing"}:${initialMessages.length}:${thread?.isArchived ? "archived" : "active"}`;
+  const workspaceKey = createChatWorkspaceKey(thread?.id ?? null, Boolean(thread?.isArchived));
 
   return (
     <PromptInputProvider

@@ -47,7 +47,7 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarHeader>
       <Separator />
-      <SidebarContent className="h-auto bg-background shadow-sm">
+      <SidebarContent className="bg-background shadow-sm">
         {isAuthenticated && <NavMain />}
         {isAuthenticated && <NavRecentChats />}
         {isAuthenticated && <NavArchivedChats />}

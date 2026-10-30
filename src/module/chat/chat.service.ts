@@ -1,6 +1,6 @@
 import { TRPCError } from "@trpc/server";
 import type { UIMessage } from "ai";
-import { and, asc, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, exists, ilike, isNotNull, isNull, or } from "drizzle-orm";
 import { db } from "@/core/db/db";
 import { chatAttachment, chatMessage, chatMessageAsset, chatThread, usageEvent } from "@/core/db/db.schema";
 import { extractPlainTextFromMessage } from "@/module/ai/ai.tokens";
@@ -123,18 +123,44 @@ async function refreshThreadSummary(threadId: string) {
   });
 }
 
-export async function listThreads(userId: string, input?: { archived?: boolean; limit?: number }) {
+export async function listThreads(
+  userId: string,
+  input?: { archived?: boolean; limit?: number; offset?: number; search?: string },
+) {
   const archived = input?.archived ?? false;
   const limit = input?.limit ?? 50;
+  const search = input?.search?.trim();
+  const searchPattern = search ? `%${search.replace(/[\\%_]/g, "\\$&")}%` : null;
 
   return db.query.chatThread.findMany({
     where: and(
       eq(chatThread.userId, userId),
       archived ? isNotNull(chatThread.deletedAt) : isNull(chatThread.deletedAt),
+      searchPattern
+        ? or(
+            ilike(chatThread.title, searchPattern),
+            exists(
+              db
+                .select({ id: chatMessage.id })
+                .from(chatMessage)
+                .where(and(eq(chatMessage.threadId, chatThread.id), ilike(chatMessage.content, searchPattern))),
+            ),
+          )
+        : undefined,
     ),
-    orderBy: desc(chatThread.lastMessageAt),
+    orderBy: [desc(chatThread.isPinned), desc(chatThread.lastMessageAt)],
     limit,
+    offset: input?.offset ?? 0,
   });
+}
+
+export async function setThreadPinned(input: { userId: string; threadId: string; isPinned: boolean }) {
+  await requireOwnedThread(input.userId, input.threadId);
+  await db
+    .update(chatThread)
+    .set({ isPinned: input.isPinned })
+    .where(and(eq(chatThread.id, input.threadId), eq(chatThread.userId, input.userId)));
+  return requireOwnedThread(input.userId, input.threadId);
 }
 
 export async function createThread(input: { userId: string; title?: string; model?: string }) {
@@ -255,6 +281,16 @@ export async function archiveThread(input: { userId: string; threadId: string })
     ok: true,
     threadId: input.threadId,
   };
+}
+
+export async function deleteThread(input: { userId: string; threadId: string }) {
+  const thread = await requireOwnedThread(input.userId, input.threadId, { allowArchived: true });
+  if (!thread.deletedAt) {
+    throw new TRPCError({ code: "PRECONDITION_FAILED", message: "Archive this chat before deleting it permanently." });
+  }
+
+  await db.delete(chatThread).where(and(eq(chatThread.id, input.threadId), eq(chatThread.userId, input.userId)));
+  return { ok: true, threadId: input.threadId };
 }
 
 export async function restoreThread(input: { userId: string; threadId: string }) {

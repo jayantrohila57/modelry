@@ -8,12 +8,13 @@ export const metadata = {
   description: "Experiment with language models in the Modelry laboratory.",
 };
 
-export default async function ChatLandingPage() {
+export default async function ChatLandingPage({ searchParams }: { searchParams: Promise<{ new?: string }> }) {
+  const { new: newChatKey } = await searchParams;
   const { session } = await getServerSession();
 
   if (!session) {
     redirect(PATH.AUTH.SIGN_IN);
   }
 
-  return <ChatWorkspace mode="landing" />;
+  return <ChatWorkspace key={newChatKey ?? "landing"} mode="landing" />;
 }

@@ -3,22 +3,36 @@ import { listAllowedAiModelsForUser } from "@/module/ai/ai.models";
 import {
   archiveThreadInputSchema,
   createThreadInputSchema,
+  deleteThreadInputSchema,
   getThreadInputSchema,
   listThreadsInputSchema,
+  pinThreadInputSchema,
   renameThreadInputSchema,
   restoreThreadInputSchema,
 } from "./chat.schema";
-import { archiveThread, createThread, getThread, listThreads, renameThread, restoreThread } from "./chat.service";
+import {
+  archiveThread,
+  createThread,
+  deleteThread,
+  getThread,
+  listThreads,
+  renameThread,
+  restoreThread,
+  setThreadPinned,
+} from "./chat.service";
 
 export const chatRouter = createTRPCRouter({
-  list: protectedProcedure
-    .input(listThreadsInputSchema)
-    .query(async ({ ctx, input }) =>
-      withApiSuccess(
-        await listThreads(ctx.user.id, { archived: input.archived, limit: input.limit }),
-        "Threads retrieved successfully.",
-      ),
+  list: protectedProcedure.input(listThreadsInputSchema).query(async ({ ctx, input }) =>
+    withApiSuccess(
+      await listThreads(ctx.user.id, {
+        archived: input.archived,
+        limit: input.limit,
+        offset: input.offset,
+        search: input.search,
+      }),
+      "Threads retrieved successfully.",
     ),
+  ),
   get: protectedProcedure
     .input(getThreadInputSchema)
     .query(async ({ ctx, input }) =>
@@ -65,13 +79,21 @@ export const chatRouter = createTRPCRouter({
       "Thread restored successfully.",
     ),
   ),
-  delete: protectedProcedure.input(archiveThreadInputSchema).mutation(async ({ ctx, input }) =>
+  pin: protectedProcedure
+    .input(pinThreadInputSchema)
+    .mutation(async ({ ctx, input }) =>
+      withApiSuccess(
+        await setThreadPinned({ userId: ctx.user.id, threadId: input.threadId, isPinned: input.isPinned }),
+        input.isPinned ? "Chat pinned." : "Chat unpinned.",
+      ),
+    ),
+  delete: protectedProcedure.input(deleteThreadInputSchema).mutation(async ({ ctx, input }) =>
     withApiSuccess(
-      await archiveThread({
+      await deleteThread({
         userId: ctx.user.id,
         threadId: input.threadId,
       }),
-      "Thread archived successfully.",
+      "Chat permanently deleted.",
     ),
   ),
 });

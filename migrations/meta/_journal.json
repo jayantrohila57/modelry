@@ -43,6 +43,13 @@
       "when": 1793331987053,
       "tag": "0005_lethal_blazing_skull",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793344614953,
+      "tag": "0006_premium_alice",
+      "breakpoints": true
     }
   ]
 }
