@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getServerSession } from "@/core/auth/auth.server";
+import { getSignInDestination } from "@/module/auth/auth.callback";
 import { ChatWorkspace } from "@/module/chat/chat.workspace";
 import { PATH } from "@/shared/config/routes";
 
@@ -13,7 +14,7 @@ export default async function ChatLandingPage({ searchParams }: { searchParams: 
   const { session } = await getServerSession();
 
   if (!session) {
-    redirect(PATH.AUTH.SIGN_IN);
+    redirect(getSignInDestination(PATH.CHAT.ROOT));
   }
 
   return <ChatWorkspace key={newChatKey ?? "landing"} mode="landing" />;

@@ -8,10 +8,10 @@ const GitHubSignIn = dynamic(() => import("./auth.github-sign-in").then((mod) =>
   loading: () => <Skeleton className="h-10 w-full rounded-full" />,
 });
 
-export function AuthProviders() {
+export function AuthProviders({ callbackURL }: { callbackURL?: string }) {
   return (
     <Suspense>
-      <GitHubSignIn />
+      <GitHubSignIn callbackURL={callbackURL} />
     </Suspense>
   );
 }

@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { notFound, redirect } from "next/navigation";
 import { apiServer } from "@/core/api/api.server";
 import { getServerSession } from "@/core/auth/auth.server";
+import { getSignInDestination } from "@/module/auth/auth.callback";
 import { ChatWorkspace } from "@/module/chat/chat.workspace";
 import type { PersistedChatMessage } from "@/module/chat/chat-message.utils";
 import { PATH } from "@/shared/config/routes";
@@ -16,7 +17,7 @@ export default async function ChatThreadPage({ params }: { params: Promise<{ thr
   const { session } = await getServerSession();
 
   if (!session) {
-    redirect(PATH.AUTH.SIGN_IN);
+    redirect(getSignInDestination(PATH.CHAT.THREAD(threadId)));
   }
 
   try {
