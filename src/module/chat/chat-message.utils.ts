@@ -101,6 +101,18 @@ export function getReasoningFromUiMessage(message: UIMessage) {
     .trim();
 }
 
+export function formatMessageTimestamp(createdAt: Date) {
+  return new Intl.DateTimeFormat("en", {
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    month: "short",
+    timeZone: "UTC",
+    timeZoneName: "short",
+    year: "numeric",
+  }).format(createdAt);
+}
+
 export function getThreadIdFromMessageMetadata(message: UIMessage | undefined) {
   const metadata = message?.metadata as { threadId?: unknown } | undefined;
 

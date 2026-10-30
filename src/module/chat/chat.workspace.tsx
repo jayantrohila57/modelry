@@ -192,6 +192,7 @@ import {
   formatReasoningLevelLabel,
 } from "./chat.runtime";
 import {
+  formatMessageTimestamp,
   getMessageMetadata,
   getReasoningFromUiMessage,
   getTextFromUiMessage,
@@ -733,15 +734,6 @@ function getAutoTitleCandidate(messages: UIMessage[]) {
     messages.find((message) => message.role === "user" && getTextFromUiMessage(message).trim().length > 0);
 
   return preferredMessage ? deriveAutoThreadTitleFromText(getTextFromUiMessage(preferredMessage)) : "Untitled chat";
-}
-
-function formatMessageTimestamp(createdAt: Date) {
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: "UTC",
-    timeZoneName: "short",
-  }).format(createdAt);
 }
 
 function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspaceProps) {

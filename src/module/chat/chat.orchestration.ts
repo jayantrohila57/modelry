@@ -13,6 +13,7 @@ import {
   finalizeAssistantMessage,
   getThreadContextForAssistant,
   persistUserMessage,
+  prepareUserMessageReplay,
 } from "@/module/chat/chat.service";
 import {
   ensureWalletForUser,
@@ -28,6 +29,7 @@ export async function prepareChatExchange(input: {
   requestMessages: UIMessage[];
   additionalPromptContext?: string;
   threadId?: string | null;
+  replay?: { clientMessageId: string; content?: string };
   userId: string;
 }) {
   await ensureWalletForUser(input.userId);
@@ -52,7 +54,7 @@ export async function prepareChatExchange(input: {
     model: resolvedModel.id,
   });
 
-  const context = await getThreadContextForAssistant({
+  let context = await getThreadContextForAssistant({
     userId: input.userId,
     threadId: thread.id,
   });
@@ -82,6 +84,19 @@ export async function prepareChatExchange(input: {
   let assistantMessage: typeof chatMessage.$inferSelect;
 
   try {
+    if (input.replay) {
+      await prepareUserMessageReplay({
+        userId: input.userId,
+        threadId: thread.id,
+        clientMessageId: input.replay.clientMessageId,
+        content: input.replay.content,
+      });
+      context = await getThreadContextForAssistant({
+        userId: input.userId,
+        threadId: thread.id,
+      });
+    }
+
     assistantMessage = await createAssistantPlaceholder({
       userId: input.userId,
       threadId: thread.id,
