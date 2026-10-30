@@ -11,11 +11,11 @@ export const metadata = {
 
 export default async function ChatLandingPage({ searchParams }: { searchParams: Promise<{ new?: string }> }) {
   const { new: newChatKey } = await searchParams;
-  const { session } = await getServerSession();
+  const { session, user } = await getServerSession();
 
-  if (!session) {
+  if (!session || !user) {
     redirect(getSignInDestination(PATH.CHAT.ROOT));
   }
 
-  return <ChatWorkspace key={newChatKey ?? "landing"} mode="landing" />;
+  return <ChatWorkspace key={newChatKey ?? "landing"} mode="landing" userId={user.id} />;
 }

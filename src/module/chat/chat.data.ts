@@ -1,6 +1,7 @@
 export type ChatWorkspaceMessage = {
   key: string;
   from: "user" | "assistant";
+  content: string;
   createdAt?: Date;
   toolParts?: Array<{
     type: string;
@@ -11,13 +12,8 @@ export type ChatWorkspaceMessage = {
     errorText?: string;
   }>;
   sources?: { href: string; title: string }[];
-  versions: {
-    id: string;
-    content: string;
-  }[];
   reasoning?: {
     content: string;
-    duration?: number;
   };
   usage?: {
     completionTokens: number;

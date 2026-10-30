@@ -8,7 +8,11 @@ import { getChatModel } from "@/module/ai/ai.provider";
 import { extractPlainTextFromMessage } from "@/module/ai/ai.tokens";
 import { findRelevantAssetChunks } from "@/module/assets/assets.ingestion";
 import { linkAssetsToThread, validateAssetsForChat } from "@/module/assets/assets.service";
-import { finalizeChatExchange, prepareChatExchange } from "@/module/chat/chat.orchestration";
+import {
+  CHAT_CONTEXT_WINDOW_EXCEEDED_CODE,
+  finalizeChatExchange,
+  prepareChatExchange,
+} from "@/module/chat/chat.orchestration";
 import {
   type ChatReasoningEffort,
   type ChatTemperaturePreset,
@@ -50,6 +54,16 @@ const requestSchema = z.object({
 
 function buildErrorResponse(error: unknown) {
   if (error instanceof TRPCError) {
+    if (error.message.startsWith(`${CHAT_CONTEXT_WINDOW_EXCEEDED_CODE}:`)) {
+      return jsonFailure({
+        message: error.message.slice(CHAT_CONTEXT_WINDOW_EXCEEDED_CODE.length + 2),
+        code: CHAT_CONTEXT_WINDOW_EXCEEDED_CODE,
+        kind: "validation",
+        httpStatus: 413,
+        status: "failed",
+      });
+    }
+
     switch (error.code) {
       case "UNAUTHORIZED":
         return jsonFailure({

@@ -76,12 +76,6 @@ import {
   Message,
   MessageAction,
   MessageActions,
-  MessageBranch,
-  MessageBranchContent,
-  MessageBranchNext,
-  MessageBranchPage,
-  MessageBranchPrevious,
-  MessageBranchSelector,
   MessageContent,
   MessageResponse,
 } from "@/shared/components/ai-elements/message";
@@ -208,7 +202,6 @@ import {
 import {
   clearThreadDraftSnapshot,
   createThreadDraftKey,
-  type DraftAttachmentSnapshot,
   getThreadDraftSnapshot,
   saveThreadDraftSnapshot,
 } from "./thread-draft-store";
@@ -245,10 +238,12 @@ type ChatWorkspaceThread = {
 };
 
 type ChatWorkspaceProps = {
+  droppedAttachmentCount?: number;
   hasOlderMessages?: boolean;
   initialMessages?: PersistedChatMessage[];
   mode: "landing" | "thread";
   thread?: ChatWorkspaceThread | null;
+  userId: string;
 };
 
 function mapUiMessagesToWorkspaceMessages(messages: UIMessage[]): ChatWorkspaceMessage[] {
@@ -287,6 +282,7 @@ function mapUiMessagesToWorkspaceMessages(messages: UIMessage[]): ChatWorkspaceM
     return {
       from: message.role === "user" ? "user" : "assistant",
       key: message.id,
+      content: textContent,
       createdAt: (message as UIMessage & { createdAt?: Date }).createdAt,
       toolParts,
       sources,
@@ -318,12 +314,6 @@ function mapUiMessagesToWorkspaceMessages(messages: UIMessage[]): ChatWorkspaceM
               totalTokens: metadata.totalTokens ?? 0,
             }
           : undefined,
-      versions: [
-        {
-          content: textContent,
-          id: message.id,
-        },
-      ],
     } satisfies ChatWorkspaceMessage;
   });
 }
@@ -334,38 +324,6 @@ function getAssetIdsFromMessage(message: UIMessage | undefined) {
     const match = part.url.match(/\/api\/assets\/([0-9a-f-]+)\/download/i);
     return match ? [match[1]] : [];
   });
-}
-
-async function convertUrlToDraftUrl(url: string) {
-  if (!url.startsWith("blob:")) {
-    return url;
-  }
-
-  try {
-    const response = await fetch(url);
-    const blob = await response.blob();
-
-    return await new Promise<string>((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(typeof reader.result === "string" ? reader.result : url);
-      reader.onerror = () => resolve(url);
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return url;
-  }
-}
-
-async function serializeDraftAttachments(files: (FileUIPart & { id: string })[]): Promise<DraftAttachmentSnapshot[]> {
-  return Promise.all(
-    files.map(async (file) => ({
-      filename: file.filename ?? "attachment",
-      id: file.id,
-      mediaType: file.mediaType,
-      type: "file" as const,
-      url: await convertUrlToDraftUrl(file.url),
-    })),
-  );
 }
 
 function AttachmentItem({
@@ -399,38 +357,30 @@ function PromptInputAttachmentsDisplay() {
   );
 }
 
-function DraftSync({ draftKey }: { draftKey: string }) {
+function DraftSync({ draftKey, droppedAttachmentCount = 0 }: { draftKey: string; droppedAttachmentCount?: number }) {
   const controller = usePromptInputController();
   const attachments = useProviderAttachments();
   const deferredText = useDeferredValue(controller.textInput.value);
 
   useEffect(() => {
-    let cancelled = false;
+    if (!deferredText.trim() && attachments.files.length === 0 && droppedAttachmentCount === 0) {
+      clearThreadDraftSnapshot(draftKey);
+      return;
+    }
 
-    const persistDraft = async () => {
-      const serializedAttachments = await serializeDraftAttachments(attachments.files);
-
-      if (cancelled) {
-        return;
-      }
-
-      if (!deferredText.trim() && serializedAttachments.length === 0) {
-        clearThreadDraftSnapshot(draftKey);
-        return;
-      }
-
-      saveThreadDraftSnapshot(draftKey, {
-        attachments: serializedAttachments,
-        text: controller.textInput.value,
-      });
-    };
-
-    void persistDraft();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [attachments.files, controller.textInput.value, deferredText, draftKey]);
+    saveThreadDraftSnapshot(draftKey, {
+      attachments: attachments.files.map((file) => ({
+        filename: file.filename ?? "attachment",
+        id: file.id,
+        mediaType: file.mediaType,
+        type: "file",
+        url: file.url,
+        file: file.file,
+      })),
+      droppedAttachmentCount,
+      text: controller.textInput.value,
+    });
+  }, [attachments.files, controller.textInput.value, deferredText, droppedAttachmentCount, draftKey]);
 
   return null;
 }
@@ -549,7 +499,7 @@ function ModelPicker({
   );
 }
 
-function MessageUsage({ message }: { message: Omit<ChatWorkspaceMessage, "versions"> }) {
+function MessageUsage({ message }: { message: ChatWorkspaceMessage }) {
   const isStreaming = message.metadata?.status === "streaming";
 
   // Don't show anything if no data and not streaming
@@ -752,16 +702,8 @@ function ThreadToolbar({
   );
 }
 
-function getChainOfThoughtLabel(isStreaming: boolean, duration?: number) {
-  if (isStreaming || duration === 0) {
-    return <span>Chain of thought...</span>;
-  }
-
-  if (duration === undefined) {
-    return <span>Chain of thought</span>;
-  }
-
-  return <span>Chain of thought | {duration}s</span>;
+function getChainOfThoughtLabel(isStreaming: boolean) {
+  return <span>{isStreaming ? "Reasoning…" : "Reasoning"}</span>;
 }
 
 function getAutoTitleCandidate(messages: UIMessage[]) {
@@ -773,16 +715,18 @@ function getAutoTitleCandidate(messages: UIMessage[]) {
 }
 
 function ChatWorkspaceInner({
+  droppedAttachmentCount = 0,
   hasOlderMessages: initialHasOlderMessages = false,
   mode,
   thread,
   initialMessages = [],
+  userId,
 }: ChatWorkspaceProps) {
   const router = useRouter();
   const isMobile = useIsMobile();
   const { openSettings } = useSettingsDialog();
   const utils = apiClient.useUtils();
-  const draftKey = createThreadDraftKey(thread?.id ?? null);
+  const draftKey = createThreadDraftKey(thread?.id ?? null, userId);
   const clientThreadId = useRef(thread?.id ?? crypto.randomUUID());
   const workspaceActiveRef = useRef(true);
   const requestInFlightRef = useRef(false);
@@ -802,6 +746,7 @@ function ChatWorkspaceInner({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editMessageText, setEditMessageText] = useState("");
+  const [contextLimitExceeded, setContextLimitExceeded] = useState(false);
   const [messageQueue, setMessageQueue] = useState<PromptInputMessage[]>([]);
   const failedExchangeRef = useRef<{
     body: {
@@ -907,8 +852,11 @@ function ChatWorkspaceInner({
     id: thread?.id ?? "landing-chat",
     messages: initialUiMessages,
     onError: (nextError) => {
-      const errorMessage =
-        nextError.name === "TimeoutError"
+      const isContextLimit = nextError.message.includes("CONTEXT_WINDOW_EXCEEDED");
+      setContextLimitExceeded(isContextLimit);
+      const errorMessage = isContextLimit
+        ? "This request exceeds the selected model’s context limit. Your text is preserved."
+        : nextError.name === "TimeoutError"
           ? "This request timed out. Your message is still available to retry."
           : nextError.message || "Failed to send chat message.";
       toast.error(errorMessage);
@@ -962,6 +910,7 @@ function ChatWorkspaceInner({
 
   const runChatRequest = useCallback(async (request: () => Promise<void>) => {
     if (requestInFlightRef.current) return;
+    setContextLimitExceeded(false);
     requestInFlightRef.current = true;
     try {
       await request();
@@ -1546,11 +1495,11 @@ function ChatWorkspaceInner({
       <Shell.Section
         className={cn(
           "grid size-full w-full  max-w-5xl grid-cols-1 px-0",
-          !isMobile && detailsOpen ? "xl:grid-cols-[minmax(0,1fr)_140px]" : "xl:grid-cols-[minmax(0,1fr)_0px]",
+          !isMobile && detailsOpen ? "xl:grid-cols-[minmax(0,1fr)_340px]" : "xl:grid-cols-[minmax(0,1fr)_0px]",
         )}
       >
         <div className="flex min-w-0 flex-col overflow-hidden">
-          <DraftSync draftKey={draftKey} />
+          <DraftSync draftKey={draftKey} droppedAttachmentCount={droppedAttachmentCount} />
           <ThreadToolbar
             detailsOpen={detailsOpen}
             isArchived={isArchived}
@@ -1607,7 +1556,7 @@ function ChatWorkspaceInner({
                     <EmptyConversationState mode={mode} />
                   </MessageScroller.Item>
                 ) : (
-                  renderedMessages.map(({ versions, ...message }) => {
+                  renderedMessages.map((message) => {
                     const isReasoningStreaming = message.metadata?.status === "streaming";
                     const sourceMessage = messages.find((item) => item.id === message.key);
                     const isLastAssistant =
@@ -1619,165 +1568,150 @@ function ChatWorkspaceInner({
                         messageId={message.key}
                         scrollAnchor={message.from === "user"}
                       >
-                        <MessageBranch defaultBranch={0}>
-                          <MessageBranchContent>
-                            {versions.map((version) => (
-                              <Message from={message.from} key={`${message.key}-${version.id}`}>
-                                <div>
-                                  {message.sources?.length ? (
-                                    <Sources>
-                                      <SourcesTrigger count={message.sources.length} />
-                                      <SourcesContent>
-                                        {message.sources.map((source) => (
-                                          <Source href={source.href} key={source.href} title={source.title} />
-                                        ))}
-                                      </SourcesContent>
-                                    </Sources>
-                                  ) : null}
-                                  {message.reasoning ? (
-                                    <Reasoning isStreaming={isReasoningStreaming}>
-                                      <ReasoningTrigger getThinkingMessage={getChainOfThoughtLabel} />
-                                      <ReasoningContent>{message.reasoning.content}</ReasoningContent>
-                                    </Reasoning>
-                                  ) : null}
-                                  <MessageContent>
-                                    {message.from === "user" && message.attachments?.length ? (
-                                      <div className="mb-3 grid gap-2">
-                                        {message.attachments.map((attachment) => (
-                                          <a
-                                            className="flex items-center gap-3 rounded-xl border bg-card p-3 text-sm hover:bg-muted/50"
-                                            href={attachment.url}
-                                            key={attachment.id}
-                                            rel="noreferrer"
-                                            target="_blank"
-                                          >
-                                            <AssetFileIcon name={attachment.name} />
-                                            <span className="min-w-0">
-                                              <span className="block truncate font-medium">{attachment.name}</span>
-                                              <span className="text-xs text-muted-foreground">
-                                                {attachment.mimeType}
-                                              </span>
-                                            </span>
-                                          </a>
-                                        ))}
-                                      </div>
-                                    ) : null}
-                                    {editingMessageId === message.key ? (
-                                      <div className="grid gap-2">
-                                        <Textarea
-                                          aria-label="Edit your message"
-                                          autoFocus
-                                          onChange={(event) => setEditMessageText(event.target.value)}
-                                          onKeyDown={(event) => {
-                                            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                                              event.preventDefault();
-                                              void saveEditedMessage();
-                                            }
-                                          }}
-                                          value={editMessageText}
-                                        />
-                                        <div className="flex gap-2">
-                                          <Button
-                                            disabled={!editMessageText.trim() || isSubmitting}
-                                            onClick={() => void saveEditedMessage()}
-                                            size="sm"
-                                            type="button"
-                                          >
-                                            <CheckIcon data-icon="inline-start" />
-                                            Save and resend
-                                          </Button>
-                                          <Button
-                                            onClick={() => setEditingMessageId(null)}
-                                            size="sm"
-                                            type="button"
-                                            variant="ghost"
-                                          >
-                                            Cancel
-                                          </Button>
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <MessageResponse>{version.content}</MessageResponse>
-                                    )}
-                                  </MessageContent>
-                                  {message.toolParts?.map((toolPart, index) => (
-                                    <Tool
-                                      defaultOpen={
-                                        toolPart.state === "input-streaming" || toolPart.state === "input-available"
-                                      }
-                                      key={`${message.key}-tool-${index}`}
-                                    >
-                                      <ToolHeader
-                                        state={toolPart.state as ToolPart["state"]}
-                                        title={`Tool: ${toolPart.toolName}`}
-                                        {...(toolPart.type === "dynamic-tool"
-                                          ? { type: "dynamic-tool" as const, toolName: toolPart.toolName }
-                                          : { type: toolPart.type as `tool-${string}` })}
-                                      />
-                                      <ToolContent>
-                                        <ToolInput input={toolPart.input as ToolPart["input"]} />
-                                        <ToolOutput
-                                          errorText={toolPart.errorText}
-                                          output={toolPart.output as ToolPart["output"]}
-                                        />
-                                      </ToolContent>
-                                    </Tool>
+                        <Message from={message.from}>
+                          <div>
+                            {message.sources?.length ? (
+                              <Sources>
+                                <SourcesTrigger count={message.sources.length} />
+                                <SourcesContent>
+                                  {message.sources.map((source) => (
+                                    <Source href={source.href} key={source.href} title={source.title} />
                                   ))}
-                                  {message.from === "assistant" ? <MessageUsage message={message} /> : null}
-                                  <div className="flex items-center justify-between gap-3 px-1">
-                                    <time
-                                      className="text-xs text-muted-foreground"
-                                      dateTime={message.createdAt?.toISOString()}
+                                </SourcesContent>
+                              </Sources>
+                            ) : null}
+                            {message.reasoning ? (
+                              <Reasoning isStreaming={isReasoningStreaming}>
+                                <ReasoningTrigger getThinkingMessage={getChainOfThoughtLabel} />
+                                <ReasoningContent>{message.reasoning.content}</ReasoningContent>
+                              </Reasoning>
+                            ) : null}
+                            <MessageContent>
+                              {message.from === "user" && message.attachments?.length ? (
+                                <div className="mb-3 grid gap-2">
+                                  {message.attachments.map((attachment) => (
+                                    <a
+                                      className="flex items-center gap-3 rounded-xl border bg-card p-3 text-sm hover:bg-muted/50"
+                                      href={attachment.url}
+                                      key={attachment.id}
+                                      rel="noreferrer"
+                                      target="_blank"
                                     >
-                                      {message.createdAt ? formatMessageTimestamp(message.createdAt) : null}
-                                    </time>
-                                    <MessageActions>
-                                      <MessageAction
-                                        label="Copy message"
-                                        onClick={() => {
-                                          void navigator.clipboard.writeText(version.content).then(
-                                            () => toast.success("Message copied."),
-                                            () => toast.error("Could not copy this message."),
-                                          );
-                                        }}
-                                        tooltip="Copy message"
-                                      >
-                                        <CopyIcon />
-                                      </MessageAction>
-                                      {message.from === "user" && sourceMessage ? (
-                                        <MessageAction
-                                          disabled={isSubmitting || isArchived || !thread?.id}
-                                          label="Edit and resend message"
-                                          onClick={() => startEditingMessage(sourceMessage)}
-                                          tooltip="Edit and resend"
-                                        >
-                                          <PencilIcon />
-                                        </MessageAction>
-                                      ) : null}
-                                      {isLastAssistant ? (
-                                        <MessageAction
-                                          disabled={isSubmitting || isArchived}
-                                          label="Regenerate response"
-                                          onClick={() => void regenerateLastAnswer()}
-                                          tooltip="Regenerate response"
-                                        >
-                                          <RotateCwIcon />
-                                        </MessageAction>
-                                      ) : null}
-                                    </MessageActions>
+                                      <AssetFileIcon name={attachment.name} />
+                                      <span className="min-w-0">
+                                        <span className="block truncate font-medium">{attachment.name}</span>
+                                        <span className="text-xs text-muted-foreground">{attachment.mimeType}</span>
+                                      </span>
+                                    </a>
+                                  ))}
+                                </div>
+                              ) : null}
+                              {editingMessageId === message.key ? (
+                                <div className="grid gap-2">
+                                  <Textarea
+                                    aria-label="Edit your message"
+                                    autoFocus
+                                    onChange={(event) => setEditMessageText(event.target.value)}
+                                    onKeyDown={(event) => {
+                                      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                                        event.preventDefault();
+                                        void saveEditedMessage();
+                                      }
+                                    }}
+                                    value={editMessageText}
+                                  />
+                                  <div className="flex gap-2">
+                                    <Button
+                                      disabled={!editMessageText.trim() || isSubmitting}
+                                      onClick={() => void saveEditedMessage()}
+                                      size="sm"
+                                      type="button"
+                                    >
+                                      <CheckIcon data-icon="inline-start" />
+                                      Save and resend
+                                    </Button>
+                                    <Button
+                                      onClick={() => setEditingMessageId(null)}
+                                      size="sm"
+                                      type="button"
+                                      variant="ghost"
+                                    >
+                                      Cancel
+                                    </Button>
                                   </div>
                                 </div>
-                              </Message>
+                              ) : (
+                                <MessageResponse>{message.content}</MessageResponse>
+                              )}
+                            </MessageContent>
+                            {message.toolParts?.map((toolPart, index) => (
+                              <Tool
+                                defaultOpen={
+                                  toolPart.state === "input-streaming" || toolPart.state === "input-available"
+                                }
+                                key={`${message.key}-tool-${index}`}
+                              >
+                                <ToolHeader
+                                  state={toolPart.state as ToolPart["state"]}
+                                  title={`Tool: ${toolPart.toolName}`}
+                                  {...(toolPart.type === "dynamic-tool"
+                                    ? { type: "dynamic-tool" as const, toolName: toolPart.toolName }
+                                    : { type: toolPart.type as `tool-${string}` })}
+                                />
+                                <ToolContent>
+                                  <ToolInput input={toolPart.input as ToolPart["input"]} />
+                                  <ToolOutput
+                                    errorText={toolPart.errorText}
+                                    output={toolPart.output as ToolPart["output"]}
+                                  />
+                                </ToolContent>
+                              </Tool>
                             ))}
-                          </MessageBranchContent>
-                          {versions.length > 1 ? (
-                            <MessageBranchSelector>
-                              <MessageBranchPrevious />
-                              <MessageBranchPage />
-                              <MessageBranchNext />
-                            </MessageBranchSelector>
-                          ) : null}
-                        </MessageBranch>
+                            {message.from === "assistant" ? <MessageUsage message={message} /> : null}
+                            <div className="flex items-center justify-between gap-3 px-1">
+                              <time
+                                className="text-xs text-muted-foreground"
+                                dateTime={message.createdAt?.toISOString()}
+                              >
+                                {message.createdAt ? formatMessageTimestamp(message.createdAt) : null}
+                              </time>
+                              <MessageActions>
+                                <MessageAction
+                                  label="Copy message"
+                                  onClick={() => {
+                                    void navigator.clipboard.writeText(message.content).then(
+                                      () => toast.success("Message copied."),
+                                      () => toast.error("Could not copy this message."),
+                                    );
+                                  }}
+                                  tooltip="Copy message"
+                                >
+                                  <CopyIcon />
+                                </MessageAction>
+                                {message.from === "user" && sourceMessage ? (
+                                  <MessageAction
+                                    disabled={isSubmitting || isArchived || !thread?.id}
+                                    label="Edit and resend message"
+                                    onClick={() => startEditingMessage(sourceMessage)}
+                                    tooltip="Edit and resend"
+                                  >
+                                    <PencilIcon />
+                                  </MessageAction>
+                                ) : null}
+                                {isLastAssistant ? (
+                                  <MessageAction
+                                    disabled={isSubmitting || isArchived}
+                                    label="Regenerate response"
+                                    onClick={() => void regenerateLastAnswer()}
+                                    tooltip="Regenerate response"
+                                  >
+                                    <RotateCwIcon />
+                                  </MessageAction>
+                                ) : null}
+                              </MessageActions>
+                            </div>
+                          </div>
+                        </Message>
                       </MessageScroller.Item>
                     );
                   })
@@ -1868,7 +1802,26 @@ function ChatWorkspaceInner({
                 </div>
               )}
               <div className="w-full p-2">
-                {status === "error" && failedExchangeRef.current ? (
+                {droppedAttachmentCount > attachments.files.length ? (
+                  <Alert className="mb-2">
+                    <AlertTitle>Reattach your files</AlertTitle>
+                    <AlertDescription>
+                      Your draft text was restored, but browser storage does not keep file contents. Reattach{" "}
+                      {droppedAttachmentCount - attachments.files.length} file
+                      {droppedAttachmentCount - attachments.files.length === 1 ? "" : "s"} to include them.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+                {contextLimitExceeded ? (
+                  <Alert className="mb-2" variant="destructive">
+                    <AlertTitle>Context limit reached</AlertTitle>
+                    <AlertDescription>
+                      Your message is preserved. Shorten the prompt, remove attachments, or select a model with a larger
+                      context window, then send again.
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+                {status === "error" && failedExchangeRef.current && !contextLimitExceeded ? (
                   <Alert className="mb-2" variant="destructive">
                     <AlertTitle>
                       {failedExchangeRef.current.body.operation === "regenerate"
@@ -2148,8 +2101,9 @@ export function ChatWorkspace({
   mode,
   thread = null,
   initialMessages = [],
+  userId,
 }: ChatWorkspaceProps) {
-  const draftKey = createThreadDraftKey(thread?.id ?? null);
+  const draftKey = createThreadDraftKey(thread?.id ?? null, userId);
   const initialDraft = getThreadDraftSnapshot(draftKey) ?? { attachments: [], text: "" };
   const workspaceKey = createChatWorkspaceKey(thread?.id ?? null, Boolean(thread?.isArchived));
 
@@ -2157,13 +2111,15 @@ export function ChatWorkspace({
     <PromptInputProvider
       initialAttachments={initialDraft.attachments}
       initialInput={initialDraft.text}
-      key={workspaceKey}
+      key={`${workspaceKey}:${userId}`}
     >
       <ChatWorkspaceInner
+        droppedAttachmentCount={initialDraft.droppedAttachmentCount}
         hasOlderMessages={hasOlderMessages}
         initialMessages={initialMessages}
         mode={mode}
         thread={thread}
+        userId={userId}
       />
     </PromptInputProvider>
   );

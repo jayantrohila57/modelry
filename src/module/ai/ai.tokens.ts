@@ -27,6 +27,18 @@ export function estimateTokensFromMessages(messages: UIMessage[]) {
   return messages.reduce((total, message) => total + estimateTokenCount(extractPlainTextFromMessage(message)), 0);
 }
 
+export function getChatInputTokenLimit(contextWindow: number | null | undefined) {
+  if (!Number.isFinite(contextWindow) || !contextWindow || contextWindow < 1) return null;
+
+  const outputReserve = Math.min(2048, Math.max(256, Math.ceil(contextWindow * 0.1)));
+  return Math.max(0, Math.floor(contextWindow - outputReserve));
+}
+
+export function exceedsChatContextWindow(estimatedPromptTokens: number, contextWindow: number | null | undefined) {
+  const inputLimit = getChatInputTokenLimit(contextWindow);
+  return inputLimit !== null && estimatedPromptTokens > inputLimit;
+}
+
 export function estimateCreditReservation(tokens: number, ratio: number, minimum: number) {
   return Math.max(minimum, Math.ceil(tokens * ratio));
 }
