@@ -50,6 +50,13 @@
       "when": 1793344614953,
       "tag": "0006_premium_alice",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793354100999,
+      "tag": "0007_nifty_leader",
+      "breakpoints": true
     }
   ]
 }

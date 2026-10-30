@@ -1,6 +1,7 @@
 "use client";
 
 import { useChat } from "@ai-sdk/react";
+import { MessageScroller } from "@shadcn/react/message-scroller";
 import { DefaultChatTransport, type FileUIPart, type UIMessage } from "ai";
 import {
   ArchiveRestore,
@@ -21,7 +22,6 @@ import {
 import { useRouter } from "next/navigation";
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useStickToBottomContext } from "use-stick-to-bottom";
 import {
   apiClient,
   getApiErrorMessage,
@@ -32,6 +32,7 @@ import {
 } from "@/core/api/api.client";
 import { AssetFileIcon } from "@/module/assets/asset-file-icon";
 import { AssetUploadSteps } from "@/module/assets/asset-upload-steps";
+import { ASSET_FILE_TYPES } from "@/module/assets/assets.domain";
 import { type AssetUploadProgress, uploadAndProcessAsset } from "@/module/assets/assets.upload";
 import { announceChatChange, createChatWorkspaceKey, getNewChatDestination } from "@/module/chat/chat.navigation";
 import { createRetryChatRequest, resolveChatRequestThreadId } from "@/module/chat/chat.request.utils";
@@ -62,6 +63,7 @@ import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
+  useConversationViewport,
 } from "@/shared/components/ai-elements/conversation";
 import {
   InlineCitation,
@@ -186,10 +188,13 @@ import { cn } from "@/shared/utils/lib/utils";
 import { CHAT_RECENT_THREADS_LIMIT, type ChatWorkspaceMessage, chatSuggestions } from "./chat.data";
 import { ChatMetaRail, ChatMetaRailToggle } from "./chat.meta-rail";
 import {
-  CHAT_REASONING_LEVELS,
-  type ChatReasoningLevel,
+  CHAT_REASONING_EFFORTS,
+  CHAT_TEMPERATURE_PRESETS,
+  type ChatReasoningEffort,
+  type ChatTemperaturePreset,
   deriveAutoThreadTitleFromText,
-  formatReasoningLevelLabel,
+  formatReasoningEffortLabel,
+  formatTemperaturePresetLabel,
 } from "./chat.runtime";
 import {
   formatMessageTimestamp,
@@ -210,7 +215,13 @@ import {
 
 const chatTransport = new DefaultChatTransport({
   api: "/api/ai/chat",
+  fetch: (input, init) => {
+    const timeoutSignal = AbortSignal.timeout(120_000);
+    const signal = init?.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal;
+    return fetch(input, { ...init, signal });
+  },
 });
+const CHAT_FILE_ACCEPT = ASSET_FILE_TYPES.map((extension) => `.${extension}`).join(",");
 
 type AllowedModel = UnwrapApiData<RouterOutputs["chat"]["models"]>[number];
 type ViewerSessionPayload = UnwrapApiData<RouterOutputs["viewer"]["session"]>;
@@ -252,12 +263,23 @@ function mapUiMessagesToWorkspaceMessages(messages: UIMessage[]): ChatWorkspaceM
 
       return [];
     });
+    const sources = message.parts.flatMap((part) => {
+      if (part.type !== "source-url") return [];
+      try {
+        const url = new URL(part.url);
+        if (url.protocol !== "http:" && url.protocol !== "https:") return [];
+        return [{ href: url.toString(), title: part.title || url.hostname }];
+      } catch {
+        return [];
+      }
+    });
 
     return {
       from: message.role === "user" ? "user" : "assistant",
       key: message.id,
       createdAt: (message as UIMessage & { createdAt?: Date }).createdAt,
       toolParts,
+      sources,
       metadata: {
         model: metadata.model,
         provider: metadata.provider,
@@ -404,15 +426,16 @@ function DraftSync({ draftKey }: { draftKey: string }) {
 }
 
 function ConversationScrollRestoration({ threadId }: { threadId: string | null }) {
-  const { scrollRef } = useStickToBottomContext();
+  const viewportRef = useConversationViewport();
   const storageKey = `modelry:chat-scroll:${threadId ?? "landing"}`;
 
   useEffect(() => {
-    const scrollElement = scrollRef.current;
+    const scrollElement = viewportRef?.current;
     if (!scrollElement) return;
 
     let restored = false;
-    let frame = 0;
+    let firstFrame = 0;
+    let secondFrame = 0;
     const restore = () => {
       const savedPosition = Number(sessionStorage.getItem(storageKey));
       if (Number.isFinite(savedPosition) && savedPosition > 0) {
@@ -420,17 +443,20 @@ function ConversationScrollRestoration({ threadId }: { threadId: string | null }
       }
       restored = true;
     };
-    frame = window.requestAnimationFrame(restore);
+    firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(restore);
+    });
     const save = () => {
       if (restored) sessionStorage.setItem(storageKey, String(scrollElement.scrollTop));
     };
     scrollElement.addEventListener("scroll", save, { passive: true });
     return () => {
-      window.cancelAnimationFrame(frame);
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
       save();
       scrollElement.removeEventListener("scroll", save);
     };
-  }, [scrollRef, storageKey]);
+  }, [storageKey, viewportRef]);
 
   return null;
 }
@@ -743,6 +769,9 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
   const utils = apiClient.useUtils();
   const draftKey = createThreadDraftKey(thread?.id ?? null);
   const clientThreadId = useRef(thread?.id ?? crypto.randomUUID());
+  const workspaceActiveRef = useRef(true);
+  const requestInFlightRef = useRef(false);
+  const setMessagesRef = useRef<(messages: UIMessage[]) => void>(() => undefined);
   const requestThreadId = resolveChatRequestThreadId(thread?.id, clientThreadId.current);
   const controller = usePromptInputController();
   const attachments = useProviderAttachments();
@@ -751,7 +780,8 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
   const createAsset = apiClient.assets.create.useMutation();
   const [model, setModel] = useState(thread?.model ?? "");
   const [reasoningEnabled, setReasoningEnabled] = useState(false);
-  const [reasoningLevel, setReasoningLevel] = useState<ChatReasoningLevel>("low");
+  const [reasoningEffort, setReasoningEffort] = useState<ChatReasoningEffort>("low");
+  const [temperaturePreset, setTemperaturePreset] = useState<ChatTemperaturePreset>("medium");
   const [useWebSearch, setUseWebSearch] = useState(false);
   const [threadTitle, setThreadTitle] = useState(thread?.title ?? "Untitled chat");
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -763,12 +793,17 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
       assetIds: string[];
       model: string;
       reasoningEnabled: boolean;
-      reasoningLevel: ChatReasoningLevel;
+      reasoningEffort: ChatReasoningEffort;
+      temperaturePreset: ChatTemperaturePreset;
       threadId: string;
       webSearch: boolean;
+      operation?: "edit" | "regenerate";
     };
     files: FileUIPart[];
     messageId: string;
+    previousMessages?: UIMessage[];
+    retryPrefixMessages?: UIMessage[];
+    restoreInput?: boolean;
     text: string;
   } | null>(null);
   const [assetUploads, setAssetUploads] = useState<
@@ -791,6 +826,14 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
   );
   const isArchived = Boolean(thread?.isArchived);
   const hasNoRuntimeModels = modelsQuery.isSuccess && availableModels.length === 0;
+  const webSearchSupported = selectedModelData?.provider === "google";
+
+  useEffect(() => {
+    workspaceActiveRef.current = true;
+    return () => {
+      workspaceActiveRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     const preferredModel =
@@ -846,8 +889,19 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
     id: thread?.id ?? "landing-chat",
     messages: initialUiMessages,
     onError: (nextError) => {
-      toast.error(nextError.message || "Failed to send chat message.");
-      if (failedExchangeRef.current?.text && !controller.textInput.value.trim()) {
+      const errorMessage =
+        nextError.name === "TimeoutError"
+          ? "This request timed out. Your message is still available to retry."
+          : nextError.message || "Failed to send chat message.";
+      toast.error(errorMessage);
+      if (failedExchangeRef.current?.previousMessages) {
+        setMessagesRef.current(failedExchangeRef.current.previousMessages);
+      }
+      if (
+        failedExchangeRef.current?.restoreInput !== false &&
+        failedExchangeRef.current?.text &&
+        !controller.textInput.value.trim()
+      ) {
         controller.textInput.setInput(failedExchangeRef.current.text);
       }
     },
@@ -857,13 +911,13 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
       invalidateThreadLists();
       void utils.viewer.session.invalidate();
 
-      if (thread?.id) {
+      if (thread?.id && workspaceActiveRef.current) {
         void utils.chat.get.invalidate({ threadId: thread.id });
         router.refresh();
       }
 
       const nextThreadId = getThreadIdFromMessageMetadata(message);
-      if (!thread?.id && nextThreadId) {
+      if (workspaceActiveRef.current && !thread?.id && nextThreadId) {
         clearThreadDraftSnapshot(draftKey);
         startTransition(() => {
           router.replace(PATH.CHAT.THREAD(nextThreadId));
@@ -872,7 +926,7 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
 
       // Auto-send next queued message if any
       setMessageQueue((prev) => {
-        if (prev.length > 0) {
+        if (workspaceActiveRef.current && prev.length > 0) {
           const [nextMessage, ...remaining] = prev;
           // Send next message after a small delay to ensure state is updated
           setTimeout(() => {
@@ -886,22 +940,37 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
     transport: chatTransport,
   });
 
+  setMessagesRef.current = setMessages;
+
+  const runChatRequest = useCallback(async (request: () => Promise<void>) => {
+    if (requestInFlightRef.current) return;
+    requestInFlightRef.current = true;
+    try {
+      await request();
+    } finally {
+      requestInFlightRef.current = false;
+    }
+  }, []);
+
   const sendChatExchange = useCallback(
     async (exchange: NonNullable<typeof failedExchangeRef.current>) => {
       failedExchangeRef.current = exchange;
       const retryRequest = createRetryChatRequest(exchange);
-      await sendMessage(retryRequest.message, { body: retryRequest.body });
+      await runChatRequest(() => sendMessage(retryRequest.message, { body: retryRequest.body }));
     },
-    [sendMessage],
+    [runChatRequest, sendMessage],
   );
 
   const retryFailedExchange = useCallback(async () => {
     const exchange = failedExchangeRef.current;
     if (!exchange) return;
 
+    if (exchange.retryPrefixMessages) {
+      setMessages(exchange.retryPrefixMessages);
+    }
     const retryRequest = createRetryChatRequest(exchange);
-    await sendMessage(retryRequest.message, { body: retryRequest.body });
-  }, [sendMessage]);
+    await runChatRequest(() => sendMessage(retryRequest.message, { body: retryRequest.body }));
+  }, [runChatRequest, sendMessage, setMessages]);
 
   const startEditingMessage = useCallback((message: UIMessage) => {
     setEditingMessageId(message.id);
@@ -919,28 +988,38 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
       ...target,
       parts: [{ type: "text", text: editedText }, ...target.parts.filter((part) => part.type === "file")],
     };
-    setMessages(messages.slice(0, messageIndex));
-    setEditingMessageId(null);
-    setEditMessageText("");
-    await sendMessage(editedMessage, {
+    const exchange = {
       body: {
         assetIds: getAssetIdsFromMessage(target),
         model,
-        operation: "edit",
+        operation: "edit" as const,
         reasoningEnabled,
-        reasoningLevel,
+        reasoningEffort,
+        temperaturePreset,
         threadId: requestThreadId,
         webSearch: useWebSearch,
       },
-    });
+      files: target.parts.filter((part) => part.type === "file") as FileUIPart[],
+      messageId: editedMessage.id,
+      previousMessages: messages,
+      retryPrefixMessages: messages.slice(0, messageIndex),
+      text: editedText,
+    };
+    failedExchangeRef.current = exchange;
+    setMessages(messages.slice(0, messageIndex));
+    setEditingMessageId(null);
+    setEditMessageText("");
+    await runChatRequest(() => sendMessage(editedMessage, { body: exchange.body }));
   }, [
     editMessageText,
     editingMessageId,
     messages,
     model,
     reasoningEnabled,
-    reasoningLevel,
+    reasoningEffort,
+    temperaturePreset,
     requestThreadId,
+    runChatRequest,
     sendMessage,
     setMessages,
     status,
@@ -950,37 +1029,75 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
   const regenerateLastAnswer = useCallback(async () => {
     if (!thread?.id || status === "submitted" || status === "streaming") return;
     const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
-    await regenerate({
+    if (!lastUserMessage) return;
+    const lastUserIndex = messages.findIndex((message) => message.id === lastUserMessage.id);
+    failedExchangeRef.current = {
       body: {
         assetIds: getAssetIdsFromMessage(lastUserMessage),
         model,
         operation: "regenerate",
         reasoningEnabled,
-        reasoningLevel,
+        reasoningEffort,
+        temperaturePreset,
         threadId: requestThreadId,
         webSearch: useWebSearch,
       },
-    });
+      files: lastUserMessage.parts.filter((part) => part.type === "file") as FileUIPart[],
+      messageId: lastUserMessage.id,
+      previousMessages: messages,
+      retryPrefixMessages: messages.slice(0, lastUserIndex + 1),
+      restoreInput: false,
+      text: getTextFromUiMessage(lastUserMessage),
+    };
+    await runChatRequest(() =>
+      regenerate({
+        body: {
+          assetIds: getAssetIdsFromMessage(lastUserMessage),
+          model,
+          operation: "regenerate",
+          reasoningEnabled,
+          reasoningEffort,
+          temperaturePreset,
+          threadId: requestThreadId,
+          webSearch: useWebSearch,
+        },
+      }),
+    );
   }, [
     messages,
     model,
     reasoningEnabled,
-    reasoningLevel,
+    reasoningEffort,
+    temperaturePreset,
     regenerate,
     requestThreadId,
+    runChatRequest,
     status,
     thread?.id,
     useWebSearch,
   ]);
 
   const renderedMessages = useMemo(() => mapUiMessagesToWorkspaceMessages(messages), [messages]);
-  const reasoningSupported = selectedModelData?.supportsReasoning ?? true;
+  const latestAssistantMetadata = [...messages].reverse().find((message) => message.role === "assistant")?.metadata as
+    | { completionTokens?: number; promptTokens?: number; reasoningTokens?: number }
+    | undefined;
+  const measuredPromptTokens = Number(latestAssistantMetadata?.promptTokens ?? 0);
+  const measuredCompletionTokens = Number(latestAssistantMetadata?.completionTokens ?? 0);
+  const draftTokenEstimate = Math.ceil(controller.textInput.value.length / 4) + attachments.files.length * 1000;
+  const reasoningSupported = selectedModelData?.supportsReasoning ?? false;
+  const reasoningEffortSupported = selectedModelData?.provider === "google";
 
   useEffect(() => {
     if (!reasoningSupported && reasoningEnabled) {
       setReasoningEnabled(false);
     }
   }, [reasoningEnabled, reasoningSupported]);
+
+  useEffect(() => {
+    if (!webSearchSupported && useWebSearch) {
+      setUseWebSearch(false);
+    }
+  }, [useWebSearch, webSearchSupported]);
 
   const renameThread = apiClient.chat.rename.useMutation({
     onError: (mutationError) => {
@@ -1085,7 +1202,8 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
           assetIds: [],
           model,
           reasoningEnabled,
-          reasoningLevel,
+          reasoningEffort,
+          temperaturePreset,
           threadId: requestThreadId,
           webSearch: useWebSearch,
         },
@@ -1100,7 +1218,8 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
       messageQueue.length,
       model,
       reasoningEnabled,
-      reasoningLevel,
+      reasoningEffort,
+      temperaturePreset,
       sendChatExchange,
       requestThreadId,
     ],
@@ -1183,7 +1302,8 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
             assetIds: [],
             model,
             reasoningEnabled,
-            reasoningLevel,
+            reasoningEffort,
+            temperaturePreset,
             threadId: requestThreadId,
             webSearch: useWebSearch,
           },
@@ -1267,7 +1387,8 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
             assetIds: uploadedFiles.map((item) => item.assetId),
             model,
             reasoningEnabled,
-            reasoningLevel,
+            reasoningEffort,
+            temperaturePreset,
             threadId: requestThreadId,
             webSearch: useWebSearch,
           },
@@ -1303,7 +1424,8 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
       createAsset,
       model,
       reasoningEnabled,
-      reasoningLevel,
+      reasoningEffort,
+      temperaturePreset,
       requestThreadId,
       sendChatExchange,
       useWebSearch,
@@ -1413,7 +1535,9 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
               <ConversationScrollRestoration threadId={thread?.id ?? null} />
               <ConversationContent>
                 {renderedMessages.length === 0 ? (
-                  <EmptyConversationState mode={mode} />
+                  <MessageScroller.Item messageId="empty" scrollAnchor>
+                    <EmptyConversationState mode={mode} />
+                  </MessageScroller.Item>
                 ) : (
                   renderedMessages.map(({ versions, ...message }) => {
                     const isReasoningStreaming = message.metadata?.status === "streaming";
@@ -1422,181 +1546,191 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
                       message.from === "assistant" && renderedMessages.at(-1)?.key === message.key;
 
                     return (
-                      <MessageBranch defaultBranch={0} key={message.key}>
-                        <MessageBranchContent>
-                          {versions.map((version) => (
-                            <Message from={message.from} key={`${message.key}-${version.id}`}>
-                              <div>
-                                {message.sources?.length ? (
-                                  <Sources>
-                                    <SourcesTrigger count={message.sources.length} />
-                                    <SourcesContent>
-                                      {message.sources.map((source) => (
-                                        <Source href={source.href} key={source.href} title={source.title} />
-                                      ))}
-                                    </SourcesContent>
-                                  </Sources>
-                                ) : null}
-                                {message.reasoning ? (
-                                  <Reasoning isStreaming={isReasoningStreaming}>
-                                    <ReasoningTrigger getThinkingMessage={getChainOfThoughtLabel} />
-                                    <ReasoningContent>{message.reasoning.content}</ReasoningContent>
-                                  </Reasoning>
-                                ) : null}
-                                <MessageContent>
-                                  {message.from === "user" && message.attachments?.length ? (
-                                    <div className="mb-3 grid gap-2">
-                                      {message.attachments.map((attachment) => (
-                                        <a
-                                          className="flex items-center gap-3 rounded-xl border bg-card p-3 text-sm hover:bg-muted/50"
-                                          href={attachment.url}
-                                          key={attachment.id}
-                                          rel="noreferrer"
-                                          target="_blank"
-                                        >
-                                          <AssetFileIcon name={attachment.name} />
-                                          <span className="min-w-0">
-                                            <span className="block truncate font-medium">{attachment.name}</span>
-                                            <span className="text-xs text-muted-foreground">{attachment.mimeType}</span>
-                                          </span>
-                                        </a>
-                                      ))}
-                                    </div>
+                      <MessageScroller.Item
+                        key={message.key}
+                        messageId={message.key}
+                        scrollAnchor={message.from === "user"}
+                      >
+                        <MessageBranch defaultBranch={0}>
+                          <MessageBranchContent>
+                            {versions.map((version) => (
+                              <Message from={message.from} key={`${message.key}-${version.id}`}>
+                                <div>
+                                  {message.sources?.length ? (
+                                    <Sources>
+                                      <SourcesTrigger count={message.sources.length} />
+                                      <SourcesContent>
+                                        {message.sources.map((source) => (
+                                          <Source href={source.href} key={source.href} title={source.title} />
+                                        ))}
+                                      </SourcesContent>
+                                    </Sources>
                                   ) : null}
-                                  {editingMessageId === message.key ? (
-                                    <div className="grid gap-2">
-                                      <Textarea
-                                        aria-label="Edit your message"
-                                        autoFocus
-                                        onChange={(event) => setEditMessageText(event.target.value)}
-                                        onKeyDown={(event) => {
-                                          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                                            event.preventDefault();
-                                            void saveEditedMessage();
-                                          }
-                                        }}
-                                        value={editMessageText}
-                                      />
-                                      <div className="flex gap-2">
-                                        <Button
-                                          disabled={!editMessageText.trim() || isSubmitting}
-                                          onClick={() => void saveEditedMessage()}
-                                          size="sm"
-                                          type="button"
-                                        >
-                                          <CheckIcon data-icon="inline-start" />
-                                          Save and resend
-                                        </Button>
-                                        <Button
-                                          onClick={() => setEditingMessageId(null)}
-                                          size="sm"
-                                          type="button"
-                                          variant="ghost"
-                                        >
-                                          Cancel
-                                        </Button>
+                                  {message.reasoning ? (
+                                    <Reasoning isStreaming={isReasoningStreaming}>
+                                      <ReasoningTrigger getThinkingMessage={getChainOfThoughtLabel} />
+                                      <ReasoningContent>{message.reasoning.content}</ReasoningContent>
+                                    </Reasoning>
+                                  ) : null}
+                                  <MessageContent>
+                                    {message.from === "user" && message.attachments?.length ? (
+                                      <div className="mb-3 grid gap-2">
+                                        {message.attachments.map((attachment) => (
+                                          <a
+                                            className="flex items-center gap-3 rounded-xl border bg-card p-3 text-sm hover:bg-muted/50"
+                                            href={attachment.url}
+                                            key={attachment.id}
+                                            rel="noreferrer"
+                                            target="_blank"
+                                          >
+                                            <AssetFileIcon name={attachment.name} />
+                                            <span className="min-w-0">
+                                              <span className="block truncate font-medium">{attachment.name}</span>
+                                              <span className="text-xs text-muted-foreground">
+                                                {attachment.mimeType}
+                                              </span>
+                                            </span>
+                                          </a>
+                                        ))}
                                       </div>
-                                    </div>
-                                  ) : (
-                                    <MessageResponse>{version.content}</MessageResponse>
-                                  )}
-                                </MessageContent>
-                                {message.toolParts?.map((toolPart, index) => (
-                                  <Tool
-                                    defaultOpen={
-                                      toolPart.state === "input-streaming" || toolPart.state === "input-available"
-                                    }
-                                    key={`${message.key}-tool-${index}`}
-                                  >
-                                    <ToolHeader
-                                      state={toolPart.state as ToolPart["state"]}
-                                      title={`Tool: ${toolPart.toolName}`}
-                                      {...(toolPart.type === "dynamic-tool"
-                                        ? { type: "dynamic-tool" as const, toolName: toolPart.toolName }
-                                        : { type: toolPart.type as `tool-${string}` })}
-                                    />
-                                    <ToolContent>
-                                      <ToolInput input={toolPart.input as ToolPart["input"]} />
-                                      <ToolOutput
-                                        errorText={toolPart.errorText}
-                                        output={toolPart.output as ToolPart["output"]}
-                                      />
-                                    </ToolContent>
-                                  </Tool>
-                                ))}
-                                {message.from === "assistant" ? <MessageUsage message={message} /> : null}
-                                <div className="flex items-center justify-between gap-3 px-1">
-                                  <time
-                                    className="text-xs text-muted-foreground"
-                                    dateTime={message.createdAt?.toISOString()}
-                                  >
-                                    {message.createdAt ? formatMessageTimestamp(message.createdAt) : null}
-                                  </time>
-                                  <MessageActions>
-                                    <MessageAction
-                                      label="Copy message"
-                                      onClick={() => {
-                                        void navigator.clipboard.writeText(version.content).then(
-                                          () => toast.success("Message copied."),
-                                          () => toast.error("Could not copy this message."),
-                                        );
-                                      }}
-                                      tooltip="Copy message"
+                                    ) : null}
+                                    {editingMessageId === message.key ? (
+                                      <div className="grid gap-2">
+                                        <Textarea
+                                          aria-label="Edit your message"
+                                          autoFocus
+                                          onChange={(event) => setEditMessageText(event.target.value)}
+                                          onKeyDown={(event) => {
+                                            if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                                              event.preventDefault();
+                                              void saveEditedMessage();
+                                            }
+                                          }}
+                                          value={editMessageText}
+                                        />
+                                        <div className="flex gap-2">
+                                          <Button
+                                            disabled={!editMessageText.trim() || isSubmitting}
+                                            onClick={() => void saveEditedMessage()}
+                                            size="sm"
+                                            type="button"
+                                          >
+                                            <CheckIcon data-icon="inline-start" />
+                                            Save and resend
+                                          </Button>
+                                          <Button
+                                            onClick={() => setEditingMessageId(null)}
+                                            size="sm"
+                                            type="button"
+                                            variant="ghost"
+                                          >
+                                            Cancel
+                                          </Button>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <MessageResponse>{version.content}</MessageResponse>
+                                    )}
+                                  </MessageContent>
+                                  {message.toolParts?.map((toolPart, index) => (
+                                    <Tool
+                                      defaultOpen={
+                                        toolPart.state === "input-streaming" || toolPart.state === "input-available"
+                                      }
+                                      key={`${message.key}-tool-${index}`}
                                     >
-                                      <CopyIcon />
-                                    </MessageAction>
-                                    {message.from === "user" && sourceMessage ? (
+                                      <ToolHeader
+                                        state={toolPart.state as ToolPart["state"]}
+                                        title={`Tool: ${toolPart.toolName}`}
+                                        {...(toolPart.type === "dynamic-tool"
+                                          ? { type: "dynamic-tool" as const, toolName: toolPart.toolName }
+                                          : { type: toolPart.type as `tool-${string}` })}
+                                      />
+                                      <ToolContent>
+                                        <ToolInput input={toolPart.input as ToolPart["input"]} />
+                                        <ToolOutput
+                                          errorText={toolPart.errorText}
+                                          output={toolPart.output as ToolPart["output"]}
+                                        />
+                                      </ToolContent>
+                                    </Tool>
+                                  ))}
+                                  {message.from === "assistant" ? <MessageUsage message={message} /> : null}
+                                  <div className="flex items-center justify-between gap-3 px-1">
+                                    <time
+                                      className="text-xs text-muted-foreground"
+                                      dateTime={message.createdAt?.toISOString()}
+                                    >
+                                      {message.createdAt ? formatMessageTimestamp(message.createdAt) : null}
+                                    </time>
+                                    <MessageActions>
                                       <MessageAction
-                                        disabled={isSubmitting || isArchived || !thread?.id}
-                                        label="Edit and resend message"
-                                        onClick={() => startEditingMessage(sourceMessage)}
-                                        tooltip="Edit and resend"
+                                        label="Copy message"
+                                        onClick={() => {
+                                          void navigator.clipboard.writeText(version.content).then(
+                                            () => toast.success("Message copied."),
+                                            () => toast.error("Could not copy this message."),
+                                          );
+                                        }}
+                                        tooltip="Copy message"
                                       >
-                                        <PencilIcon />
+                                        <CopyIcon />
                                       </MessageAction>
-                                    ) : null}
-                                    {isLastAssistant ? (
-                                      <MessageAction
-                                        disabled={isSubmitting || isArchived}
-                                        label="Regenerate response"
-                                        onClick={() => void regenerateLastAnswer()}
-                                        tooltip="Regenerate response"
-                                      >
-                                        <RotateCwIcon />
-                                      </MessageAction>
-                                    ) : null}
-                                  </MessageActions>
+                                      {message.from === "user" && sourceMessage ? (
+                                        <MessageAction
+                                          disabled={isSubmitting || isArchived || !thread?.id}
+                                          label="Edit and resend message"
+                                          onClick={() => startEditingMessage(sourceMessage)}
+                                          tooltip="Edit and resend"
+                                        >
+                                          <PencilIcon />
+                                        </MessageAction>
+                                      ) : null}
+                                      {isLastAssistant ? (
+                                        <MessageAction
+                                          disabled={isSubmitting || isArchived}
+                                          label="Regenerate response"
+                                          onClick={() => void regenerateLastAnswer()}
+                                          tooltip="Regenerate response"
+                                        >
+                                          <RotateCwIcon />
+                                        </MessageAction>
+                                      ) : null}
+                                    </MessageActions>
+                                  </div>
                                 </div>
-                              </div>
-                            </Message>
-                          ))}
-                        </MessageBranchContent>
-                        {versions.length > 1 ? (
-                          <MessageBranchSelector>
-                            <MessageBranchPrevious />
-                            <MessageBranchPage />
-                            <MessageBranchNext />
-                          </MessageBranchSelector>
-                        ) : null}
-                      </MessageBranch>
+                              </Message>
+                            ))}
+                          </MessageBranchContent>
+                          {versions.length > 1 ? (
+                            <MessageBranchSelector>
+                              <MessageBranchPrevious />
+                              <MessageBranchPage />
+                              <MessageBranchNext />
+                            </MessageBranchSelector>
+                          ) : null}
+                        </MessageBranch>
+                      </MessageScroller.Item>
                     );
                   })
                 )}
                 {assetUploads.length ? (
-                  <div
-                    className="mx-auto mb-4 grid w-full max-w-3xl gap-2 px-4"
-                    role="region"
-                    aria-label="Document upload progress"
-                  >
-                    {assetUploads.map((item) => (
-                      <AssetUploadSteps
-                        key={item.id}
-                        name={item.name}
-                        sizeBytes={item.sizeBytes}
-                        progress={item.progress}
-                      />
-                    ))}
-                  </div>
+                  <MessageScroller.Item messageId="asset-upload-progress">
+                    <div
+                      className="mx-auto mb-4 grid w-full max-w-3xl gap-2 px-4"
+                      role="region"
+                      aria-label="Document upload progress"
+                    >
+                      {assetUploads.map((item) => (
+                        <AssetUploadSteps
+                          key={item.id}
+                          name={item.name}
+                          sizeBytes={item.sizeBytes}
+                          progress={item.progress}
+                        />
+                      ))}
+                    </div>
+                  </MessageScroller.Item>
                 ) : null}
               </ConversationContent>
               <ConversationScrollButton />
@@ -1668,46 +1802,57 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
               <div className="w-full p-2">
                 {status === "error" && failedExchangeRef.current ? (
                   <Alert className="mb-2" variant="destructive">
-                    <AlertTitle>Message wasn’t sent</AlertTitle>
+                    <AlertTitle>
+                      {failedExchangeRef.current.body.operation === "regenerate"
+                        ? "Response wasn’t regenerated"
+                        : failedExchangeRef.current.body.operation === "edit"
+                          ? "Edit wasn’t sent"
+                          : "Message wasn’t sent"}
+                    </AlertTitle>
                     <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
-                      <span>Your message and attached files are ready to retry.</span>
+                      <span>
+                        {failedExchangeRef.current.body.operation === "regenerate"
+                          ? "The earlier response is preserved. You can retry regeneration."
+                          : failedExchangeRef.current.body.operation === "edit"
+                            ? "Your original conversation is preserved. Retry the edited message."
+                            : "Your message and attached files are ready to retry."}
+                      </span>
                       <Button onClick={() => void retryFailedExchange()} size="sm" type="button" variant="outline">
                         Retry message
                       </Button>
                     </AlertDescription>
                   </Alert>
                 ) : null}
-                <PromptInput globalDrop multiple onSubmit={handleSend}>
+                <PromptInput
+                  accept={CHAT_FILE_ACCEPT}
+                  globalDrop
+                  maxFileSize={10 * 1024 * 1024}
+                  maxFiles={5}
+                  multiple
+                  onError={(error) => toast.error(error.message)}
+                  onSubmit={handleSend}
+                >
                   <PromptInputHeader>
                     <PromptInputAttachmentsDisplay />
                   </PromptInputHeader>
                   <PromptInputBody>
-                    <div className="flex items-start w-full px-2 justify-between">
+                    <div className="flex w-full items-start justify-between px-2">
                       <PromptInputTextarea
                         autoFocus={mode === "landing" && renderedMessages.length === 0}
-                        className="max-w-xl w-full"
+                        className="w-full min-w-0 max-w-xl"
                         disabled={isArchived}
                       />
-                      <span className="text-muted-foreground text-xs">
-                        {/* 
-                          Rough token estimation:
-                          - 0.25 multiplier assumes ~4 chars per token (approximation for English text)
-                          - 1000 tokens per file is a conservative estimate for file processing overhead
-                          Note: This is a heuristic and actual token counts may vary by model/tokenizer
-                        */}
-                        {Math.round(
-                          controller.textInput.value.length * 0.25 + attachments.files.length * 1000,
-                        ).toLocaleString()}{" "}
-                        tokens
+                      <span className="shrink-0 text-muted-foreground text-xs">
+                        ~{draftTokenEstimate.toLocaleString()} draft tokens
                       </span>
                     </div>
                   </PromptInputBody>
-                  <PromptInputFooter>
-                    <PromptInputTools>
+                  <PromptInputFooter className="flex-wrap">
+                    <PromptInputTools className="flex-wrap">
                       <PromptInputActionMenu>
                         <PromptInputActionMenuTrigger />
                         <PromptInputActionMenuContent>
-                          <PromptInputActionAddAttachments />
+                          <PromptInputActionAddAttachments label="Add documents" />
                         </PromptInputActionMenuContent>
                       </PromptInputActionMenu>
                       <SpeechInput
@@ -1717,7 +1862,14 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
                         variant="ghost"
                       />
                       <PromptInputButton
+                        aria-pressed={useWebSearch}
+                        disabled={!webSearchSupported || isArchived}
                         onClick={() => setUseWebSearch((current) => !current)}
+                        title={
+                          webSearchSupported
+                            ? "Use Google Search for this response"
+                            : "Web search requires a Google model"
+                        }
                         variant={useWebSearch ? "default" : "secondary"}
                       >
                         <GlobeIcon size={16} />
@@ -1726,6 +1878,7 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
 
                       <PromptInputButton
                         aria-label="Toggle chain of thought"
+                        aria-pressed={reasoningEnabled}
                         disabled={!reasoningSupported || isArchived}
                         onClick={() => setReasoningEnabled(!reasoningEnabled)}
                         variant={reasoningEnabled ? "default" : "secondary"}
@@ -1734,17 +1887,33 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
                         <span>{reasoningEnabled ? "Reasoning on" : "Reasoning off"}</span>
                       </PromptInputButton>
                       <PromptInputSelect
-                        disabled={!reasoningEnabled || !reasoningSupported || isArchived}
-                        onValueChange={(value: string) => setReasoningLevel(value as ChatReasoningLevel)}
-                        value={reasoningLevel}
+                        disabled={isArchived}
+                        onValueChange={(value: string) => setTemperaturePreset(value as ChatTemperaturePreset)}
+                        value={temperaturePreset}
                       >
                         <PromptInputSelectTrigger>
-                          <PromptInputSelectValue placeholder="Reasoning level" />
+                          <PromptInputSelectValue placeholder="Temperature" />
                         </PromptInputSelectTrigger>
                         <PromptInputSelectContent>
-                          {CHAT_REASONING_LEVELS.map((level) => (
+                          {CHAT_TEMPERATURE_PRESETS.map((level) => (
                             <PromptInputSelectItem key={level} value={level}>
-                              {formatReasoningLevelLabel(level)}
+                              {formatTemperaturePresetLabel(level)}
+                            </PromptInputSelectItem>
+                          ))}
+                        </PromptInputSelectContent>
+                      </PromptInputSelect>
+                      <PromptInputSelect
+                        disabled={!reasoningEnabled || !reasoningSupported || !reasoningEffortSupported || isArchived}
+                        onValueChange={(value: string) => setReasoningEffort(value as ChatReasoningEffort)}
+                        value={reasoningEffort}
+                      >
+                        <PromptInputSelectTrigger aria-label="Reasoning effort">
+                          <PromptInputSelectValue placeholder="Effort" />
+                        </PromptInputSelectTrigger>
+                        <PromptInputSelectContent>
+                          {CHAT_REASONING_EFFORTS.map((effort) => (
+                            <PromptInputSelectItem key={effort} value={effort}>
+                              {formatReasoningEffortLabel(effort)} effort
                             </PromptInputSelectItem>
                           ))}
                         </PromptInputSelectContent>
@@ -1757,14 +1926,32 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
                       <Context
                         maxTokens={selectedModelData?.contextWindow ?? 128000}
                         modelId={model}
-                        // Rough token estimation: 0.25 chars/token ratio + 1000 tokens per file attachment
-                        usedTokens={controller.textInput.value.length * 0.25 + attachments.files.length * 1000}
+                        usage={{
+                          inputTokens: measuredPromptTokens,
+                          inputTokenDetails: {
+                            cacheReadTokens: undefined,
+                            cacheWriteTokens: undefined,
+                            noCacheTokens: undefined,
+                          },
+                          outputTokens: measuredCompletionTokens,
+                          outputTokenDetails: {
+                            reasoningTokens: Number(latestAssistantMetadata?.reasoningTokens ?? 0),
+                            textTokens: measuredCompletionTokens,
+                          },
+                          totalTokens: measuredPromptTokens + measuredCompletionTokens,
+                        }}
+                        usedTokens={measuredPromptTokens || draftTokenEstimate}
                       >
                         <ContextTrigger />
 
                         <ContextContent>
                           <ContextContentHeader />
                           <ContextContentBody>
+                            <p className="mb-2 text-xs text-muted-foreground">
+                              {measuredPromptTokens > 0
+                                ? "Last response input usage from the provider."
+                                : "Rough estimate for this draft only; conversation history and document context are not included."}
+                            </p>
                             <ContextInputUsage />
                             <ContextOutputUsage />
                             <ContextReasoningUsage />
@@ -1805,8 +1992,6 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
           onRename={() => openRenameDialog()}
           onRestore={() => setRestoreDialogOpen(true)}
           open={detailsOpen}
-          reasoningEnabled={reasoningEnabled}
-          reasoningLevel={reasoningLevel}
           selectedModel={selectedModelData}
           thread={thread ? { id: thread.id } : null}
         />

@@ -8,6 +8,7 @@ export type PersistedChatMessage = {
   role: "system" | "user" | "assistant" | "tool";
   status: "pending" | "streaming" | "completed" | "failed" | "cancelled";
   content: string;
+  parts?: UIMessage["parts"] | null;
   model: string | null;
   provider: string | null;
   reasoning: string | null;
@@ -41,38 +42,11 @@ export type PersistedMessageMetadata = {
 };
 
 export function mapPersistedMessagesToUiMessages(messages: PersistedChatMessage[]): UIMessage[] {
-  return messages.map((message) => ({
-    createdAt: message.createdAt,
-    id: message.clientMessageId ?? message.id,
-    metadata: {
-      completionTokens: message.completionTokens,
-      creditCost: message.creditCost,
-      model: message.model ?? undefined,
-      persistedMessageId: message.id,
-      promptTokens: message.promptTokens,
-      provider: message.provider ?? undefined,
-      reasoningTokens: message.reasoningTokens,
-      status: message.status,
-      summaryVersionUsed: message.summaryVersionUsed,
-      threadId: message.threadId,
-      totalTokens: message.totalTokens,
-    } satisfies PersistedMessageMetadata,
-    parts: [
-      ...(message.reasoning?.trim()
-        ? [
-            {
-              text: message.reasoning,
-              type: "reasoning" as const,
-            },
-          ]
-        : []),
+  return messages.map((message) => {
+    const legacyParts: UIMessage["parts"] = [
+      ...(message.reasoning?.trim() ? [{ text: message.reasoning, type: "reasoning" as const }] : []),
       ...(message.content || message.errorMessage
-        ? [
-            {
-              text: message.content || message.errorMessage || "",
-              type: "text" as const,
-            },
-          ]
+        ? [{ text: message.content || message.errorMessage || "", type: "text" as const }]
         : []),
       ...(message.attachments ?? []).map((attachment) => ({
         type: "file" as const,
@@ -80,9 +54,28 @@ export function mapPersistedMessagesToUiMessages(messages: PersistedChatMessage[
         filename: attachment.name,
         url: `/api/assets/${attachment.id}/download`,
       })),
-    ],
-    role: message.role === "tool" ? "assistant" : message.role,
-  }));
+    ];
+
+    return {
+      createdAt: message.createdAt,
+      id: message.clientMessageId ?? message.id,
+      metadata: {
+        completionTokens: message.completionTokens,
+        creditCost: message.creditCost,
+        model: message.model ?? undefined,
+        persistedMessageId: message.id,
+        promptTokens: message.promptTokens,
+        provider: message.provider ?? undefined,
+        reasoningTokens: message.reasoningTokens,
+        status: message.status,
+        summaryVersionUsed: message.summaryVersionUsed,
+        threadId: message.threadId,
+        totalTokens: message.totalTokens,
+      } satisfies PersistedMessageMetadata,
+      parts: message.parts?.length ? message.parts : legacyParts,
+      role: message.role === "tool" ? "assistant" : message.role,
+    };
+  });
 }
 
 export function getTextFromUiMessage(message: UIMessage) {

@@ -364,17 +364,29 @@ export async function persistUserMessage(input: {
   const content = extractPlainTextFromMessage(input.message);
   const id = createId();
 
-  await db.insert(chatMessage).values({
-    id,
-    threadId: input.threadId,
-    userId: input.userId,
-    clientMessageId: input.message.id,
-    role: "user",
-    status: "completed",
-    content,
-    model: input.model ?? null,
-    finishedAt: new Date(),
+  await db
+    .insert(chatMessage)
+    .values({
+      id,
+      threadId: input.threadId,
+      userId: input.userId,
+      clientMessageId: input.message.id,
+      role: "user",
+      status: "completed",
+      content,
+      parts: input.message.parts,
+      model: input.model ?? null,
+      finishedAt: new Date(),
+    })
+    .onConflictDoNothing({ target: [chatMessage.threadId, chatMessage.clientMessageId] });
+
+  const persistedMessage = await db.query.chatMessage.findFirst({
+    where: and(eq(chatMessage.threadId, input.threadId), eq(chatMessage.clientMessageId, input.message.id)),
   });
+
+  if (!persistedMessage) {
+    throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to persist user message" });
+  }
 
   await db
     .update(chatThread)
@@ -384,17 +396,7 @@ export async function persistUserMessage(input: {
     })
     .where(eq(chatThread.id, input.threadId));
 
-  return db.query.chatMessage
-    .findFirst({
-      where: eq(chatMessage.id, id),
-    })
-    .then((message) => {
-      if (!message) {
-        throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to persist user message" });
-      }
-
-      return message;
-    });
+  return persistedMessage;
 }
 
 export async function prepareUserMessageReplay(input: {
@@ -402,47 +404,38 @@ export async function prepareUserMessageReplay(input: {
   threadId: string;
   clientMessageId: string;
   content?: string;
-}) {
+}): Promise<{
+  targetMessageId: string;
+  targetClientMessageId: string;
+  replacementContent?: string;
+  replacementParts?: UIMessage["parts"];
+  followingMessageIds: string[];
+}> {
   await requireOwnedThread(input.userId, input.threadId);
-
-  const replayedMessage = await db.transaction(async (tx) => {
-    const messages = await tx.query.chatMessage.findMany({
-      where: eq(chatMessage.threadId, input.threadId),
-      orderBy: asc(chatMessage.createdAt),
-    });
-    const targetIndex = messages.findIndex((message) => message.clientMessageId === input.clientMessageId);
-    const target = messages[targetIndex];
-
-    if (!target || target.role !== "user") {
-      throw new TRPCError({ code: "NOT_FOUND", message: "The message to retry was not found." });
-    }
-
-    const followingMessages = messages.slice(targetIndex + 1);
-    if (followingMessages.length > 0) {
-      await tx.delete(chatMessage).where(
-        inArray(
-          chatMessage.id,
-          followingMessages.map((message) => message.id),
-        ),
-      );
-    }
-
-    if (input.content !== undefined) {
-      await tx
-        .update(chatMessage)
-        .set({ content: input.content, status: "completed", errorMessage: null, finishedAt: new Date() })
-        .where(eq(chatMessage.id, target.id));
-    }
-
-    await tx
-      .update(chatThread)
-      .set({ lastMessageAt: new Date(), summary: null, summaryVersion: 0, summaryUpdatedAt: null })
-      .where(eq(chatThread.id, input.threadId));
-    return { ...target, content: input.content ?? target.content };
+  const messages = await db.query.chatMessage.findMany({
+    where: eq(chatMessage.threadId, input.threadId),
+    orderBy: asc(chatMessage.createdAt),
   });
+  const targetIndex = messages.findIndex((message) => message.clientMessageId === input.clientMessageId);
+  const target = messages[targetIndex];
 
-  await refreshThreadSummary(input.threadId);
-  return replayedMessage;
+  if (!target || target.role !== "user") {
+    throw new TRPCError({ code: "NOT_FOUND", message: "The message to retry was not found." });
+  }
+
+  return {
+    targetMessageId: target.id,
+    targetClientMessageId: input.clientMessageId,
+    replacementContent: input.content,
+    replacementParts:
+      input.content === undefined
+        ? undefined
+        : [
+            ...(target.parts ?? []).filter((part) => part.type !== "text"),
+            { type: "text" as const, text: input.content },
+          ],
+    followingMessageIds: messages.slice(targetIndex + 1).map((message) => message.id),
+  };
 }
 
 export async function createAssistantPlaceholder(input: {
@@ -495,6 +488,7 @@ export async function finalizeAssistantMessage(input: {
   threadId: string;
   messageId: string;
   content: string;
+  parts?: UIMessage["parts"];
   reasoning?: string | null;
   reasoningTokens?: number;
   promptTokens: number;
@@ -505,35 +499,71 @@ export async function finalizeAssistantMessage(input: {
   model?: string | null;
   status?: "completed" | "cancelled";
   summaryVersionUsed?: number;
+  replay?: {
+    targetMessageId: string;
+    replacementContent?: string;
+    replacementParts?: UIMessage["parts"];
+    followingMessageIds: string[];
+  };
 }) {
   await requireOwnedThread(input.userId, input.threadId);
+  await db.transaction(async (tx) => {
+    if (input.replay) {
+      if (input.replay.followingMessageIds.length > 0) {
+        await tx
+          .delete(chatMessage)
+          .where(
+            and(eq(chatMessage.threadId, input.threadId), inArray(chatMessage.id, input.replay.followingMessageIds)),
+          );
+      }
 
-  await db
-    .update(chatMessage)
-    .set({
-      status: input.status ?? "completed",
-      content: input.content,
-      reasoning: input.reasoning ?? null,
-      reasoningTokens: input.reasoningTokens ?? 0,
-      summaryVersionUsed: input.summaryVersionUsed ?? 0,
-      promptTokens: input.promptTokens,
-      completionTokens: input.completionTokens,
-      totalTokens: input.totalTokens,
-      creditCost: input.creditCost,
-      provider: input.provider ?? null,
-      model: input.model ?? null,
-      finishedAt: new Date(),
-      errorMessage: null,
-    })
-    .where(and(eq(chatMessage.id, input.messageId), eq(chatMessage.threadId, input.threadId)));
+      if (input.replay.replacementContent !== undefined) {
+        await tx
+          .update(chatMessage)
+          .set({
+            content: input.replay.replacementContent,
+            parts: input.replay.replacementParts ?? [{ type: "text", text: input.replay.replacementContent }],
+            status: "completed",
+            errorMessage: null,
+            finishedAt: new Date(),
+          })
+          .where(and(eq(chatMessage.id, input.replay.targetMessageId), eq(chatMessage.threadId, input.threadId)));
+      }
 
-  await db
-    .update(chatThread)
-    .set({
-      lastMessageAt: new Date(),
-      model: input.model ?? null,
-    })
-    .where(eq(chatThread.id, input.threadId));
+      await tx
+        .update(chatThread)
+        .set({ summary: null, summaryVersion: 0, summaryUpdatedAt: null })
+        .where(eq(chatThread.id, input.threadId));
+    }
+
+    await tx
+      .update(chatMessage)
+      .set({
+        status: input.status ?? "completed",
+        content: input.content,
+        parts: input.parts ?? (input.content ? [{ type: "text", text: input.content }] : []),
+        reasoning: input.reasoning ?? null,
+        reasoningTokens: input.reasoningTokens ?? 0,
+        summaryVersionUsed: input.summaryVersionUsed ?? 0,
+        promptTokens: input.promptTokens,
+        completionTokens: input.completionTokens,
+        totalTokens: input.totalTokens,
+        creditCost: input.creditCost,
+        provider: input.provider ?? null,
+        model: input.model ?? null,
+        finishedAt: new Date(),
+        errorMessage: null,
+      })
+      .where(and(eq(chatMessage.id, input.messageId), eq(chatMessage.threadId, input.threadId)));
+
+    await tx
+      .update(chatThread)
+      .set({
+        lastMessageAt: new Date(),
+        model: input.model ?? null,
+      })
+      .where(eq(chatThread.id, input.threadId));
+  });
 
   await db.insert(usageEvent).values({
     id: createId(),
@@ -586,7 +616,15 @@ export async function failAssistantMessage(input: {
   errorMessage: string;
   provider?: string | null;
   model?: string | null;
+  removePlaceholder?: boolean;
 }) {
+  if (input.removePlaceholder) {
+    await db
+      .delete(chatMessage)
+      .where(and(eq(chatMessage.id, input.messageId), eq(chatMessage.threadId, input.threadId)));
+    return;
+  }
+
   await db
     .update(chatMessage)
     .set({
@@ -609,9 +647,23 @@ export async function failAssistantMessage(input: {
   });
 }
 
-export async function getThreadContextForAssistant(input: { userId: string; threadId: string }) {
+export async function getThreadContextForAssistant(input: {
+  userId: string;
+  threadId: string;
+  throughClientMessageId?: string;
+  replacementContent?: string;
+}) {
   const thread = await requireOwnedThread(input.userId, input.threadId);
-  const messages = await listThreadMessages(input.threadId);
+  const allMessages = await listThreadMessages(input.threadId);
+  const cutoffIndex = input.throughClientMessageId
+    ? allMessages.findIndex((message) => message.clientMessageId === input.throughClientMessageId)
+    : -1;
+
+  if (input.throughClientMessageId && cutoffIndex < 0) {
+    throw new TRPCError({ code: "NOT_FOUND", message: "The message to retry was not found." });
+  }
+
+  const messages = cutoffIndex >= 0 ? allMessages.slice(0, cutoffIndex + 1) : allMessages;
   const eligibleMessages = messages.filter(
     (message) =>
       ["completed", "cancelled", "streaming"].includes(message.status) &&
@@ -621,17 +673,20 @@ export async function getThreadContextForAssistant(input: { userId: string; thre
   const uiMessages: UIMessage[] = recentMessages.map((message) => ({
     id: message.clientMessageId ?? message.id,
     role: (message.role === "tool" ? "assistant" : message.role) as UIMessage["role"],
-    parts: message.content
-      ? [
-          {
-            type: "text" as const,
-            text: message.content,
-          },
-        ]
-      : [],
+    parts: (() => {
+      const storedParts = (message.parts ?? []).filter((part) => part.type !== "file");
+      if (message.id === (cutoffIndex >= 0 ? messages.at(-1)?.id : null) && input.replacementContent !== undefined) {
+        return [
+          ...storedParts.filter((part) => part.type !== "text"),
+          { type: "text" as const, text: input.replacementContent },
+        ];
+      }
+      if (storedParts.length > 0) return storedParts;
+      return message.content ? [{ type: "text" as const, text: message.content }] : [];
+    })(),
   }));
 
-  if (!thread.summary?.trim()) {
+  if (cutoffIndex >= 0 || !thread.summary?.trim()) {
     return {
       messages: uiMessages,
       summaryVersion: Number(thread.summaryVersion ?? 0),

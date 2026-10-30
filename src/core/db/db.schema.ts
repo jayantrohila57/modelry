@@ -1,3 +1,4 @@
+import type { UIMessage } from "ai";
 import { relations, sql } from "drizzle-orm";
 import {
   bigint,
@@ -195,6 +196,7 @@ export const chatMessage = pgTable(
       .default("pending")
       .notNull(),
     content: text("content").notNull().default(""),
+    parts: jsonb("parts").$type<UIMessage["parts"]>().default(sql`'[]'::jsonb`).notNull(),
     model: text("model"),
     provider: text("provider"),
     reasoning: text("reasoning"),

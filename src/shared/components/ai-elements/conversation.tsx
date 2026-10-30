@@ -1,30 +1,56 @@
 "use client";
 
+import { MessageScroller } from "@shadcn/react/message-scroller";
 import type { UIMessage } from "ai";
 import { ArrowDownIcon, DownloadIcon } from "lucide-react";
-import type { ComponentProps } from "react";
-import { useCallback } from "react";
-import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
+import type { ComponentProps, RefObject } from "react";
+import { createContext, useCallback, useContext, useRef } from "react";
 import { Button } from "@/shared/components/ui/button";
 import { cn } from "@/shared/utils/lib/utils";
 
-export type ConversationProps = ComponentProps<typeof StickToBottom>;
+const ConversationViewportContext = createContext<RefObject<HTMLDivElement | null> | null>(null);
 
-export const Conversation = ({ className, ...props }: ConversationProps) => (
-  <StickToBottom
-    className={cn("relative flex-1 overflow-y-hidden", className)}
-    initial="smooth"
-    resize="smooth"
-    role="log"
-    {...props}
-  />
-);
+export function useConversationViewport() {
+  return useContext(ConversationViewportContext);
+}
 
-export type ConversationContentProps = ComponentProps<typeof StickToBottom.Content>;
+export type ConversationProps = ComponentProps<typeof MessageScroller.Root>;
 
-export const ConversationContent = ({ className, ...props }: ConversationContentProps) => (
-  <StickToBottom.Content className={cn("flex flex-col gap-8 p-4", className)} {...props} />
-);
+export const Conversation = ({ children, className, ...props }: ConversationProps) => {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+
+  return (
+    <ConversationViewportContext.Provider value={viewportRef}>
+      <MessageScroller.Provider autoScroll defaultScrollPosition="last-anchor" scrollEdgeThreshold={80}>
+        <MessageScroller.Root
+          className={cn("relative flex min-h-0 flex-1 flex-col overflow-hidden", className)}
+          {...props}
+        >
+          {children}
+        </MessageScroller.Root>
+      </MessageScroller.Provider>
+    </ConversationViewportContext.Provider>
+  );
+};
+
+export type ConversationContentProps = ComponentProps<typeof MessageScroller.Content>;
+
+export const ConversationContent = ({ className, ...props }: ConversationContentProps) => {
+  const viewportRef = useConversationViewport();
+
+  return (
+    <MessageScroller.Viewport
+      aria-label="Chat messages"
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain data-[pending-scroll]:invisible"
+      ref={viewportRef ?? undefined}
+    >
+      <MessageScroller.Content
+        className={cn("mx-auto flex w-full max-w-3xl flex-col gap-8 p-4", className)}
+        {...props}
+      />
+    </MessageScroller.Viewport>
+  );
+};
 
 export type ConversationEmptyStateProps = ComponentProps<"div"> & {
   title?: string;
@@ -56,31 +82,21 @@ export const ConversationEmptyState = ({
   </div>
 );
 
-export type ConversationScrollButtonProps = ComponentProps<typeof Button>;
+export type ConversationScrollButtonProps = ComponentProps<typeof MessageScroller.Button>;
 
 export const ConversationScrollButton = ({ className, ...props }: ConversationScrollButtonProps) => {
-  const { isAtBottom, scrollToBottom } = useStickToBottomContext();
-
-  const handleScrollToBottom = useCallback(() => {
-    scrollToBottom();
-  }, [scrollToBottom]);
-
   return (
-    !isAtBottom && (
-      <Button
-        className={cn(
-          "absolute bottom-4 z-10 bg-primary text-primary-foreground left-[50%] translate-x-[-50%] rounded-full ",
-          className,
-        )}
-        onClick={handleScrollToBottom}
-        size="icon"
-        type="button"
-        variant="outline"
-        {...props}
-      >
-        <ArrowDownIcon className="size-4" />
-      </Button>
-    )
+    <MessageScroller.Button
+      aria-label="Scroll to latest message"
+      className={cn(
+        "absolute bottom-4 left-1/2 z-10 inline-flex size-10 -translate-x-1/2 items-center justify-center rounded-full border bg-background text-foreground shadow-sm transition-opacity hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring inert:pointer-events-none inert:opacity-0",
+        className,
+      )}
+      type="button"
+      {...props}
+    >
+      <ArrowDownIcon className="size-4" />
+    </MessageScroller.Button>
   );
 };
 
