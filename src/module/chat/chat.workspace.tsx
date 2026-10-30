@@ -703,8 +703,15 @@ function ChatWorkspaceInner({
   const sendChatExchange = useCallback(
     async (exchange: NonNullable<typeof failedExchangeRef.current>) => {
       failedExchangeRef.current = exchange;
-      const retryRequest = createRetryChatRequest(exchange);
-      await runChatRequest(() => sendMessage(retryRequest.message, { body: retryRequest.body }));
+      const message: UIMessage = {
+        id: exchange.messageId,
+        role: "user",
+        parts: [
+          ...(exchange.text ? [{ type: "text" as const, text: exchange.text }] : []),
+          ...exchange.files,
+        ],
+      };
+      await runChatRequest(() => sendMessage(message, { body: exchange.body }));
     },
     [runChatRequest, sendMessage],
   );
