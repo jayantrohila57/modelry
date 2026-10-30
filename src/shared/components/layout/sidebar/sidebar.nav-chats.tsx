@@ -408,6 +408,7 @@ function ChatSearch() {
         <Input
           aria-label="Search conversations by title or message"
           autoComplete="off"
+          maxLength={120}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search conversations"
           ref={inputRef}

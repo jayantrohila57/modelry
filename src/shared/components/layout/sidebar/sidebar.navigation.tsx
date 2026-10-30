@@ -31,7 +31,7 @@ export function NavMain() {
           </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton asChild isActive={pathname === PATH.CHAT.ROOT || pathname === PATH.CHAT.ALL}>
-              <Link href={PATH.CHAT.ROOT}>
+              <Link href={PATH.CHAT.ALL}>
                 <MessageCircle className="size-4" />
                 <span>All Chats</span>
               </Link>

@@ -5,7 +5,7 @@ export const metadata = { title: "Archived chats | Modelry" };
 export default function ArchivedChatsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ offset?: string; q?: string }>;
+  searchParams: Promise<{ offset?: string | string[]; q?: string | string[] }>;
 }) {
   return <ChatHistoryPage archived searchParams={searchParams} />;
 }
