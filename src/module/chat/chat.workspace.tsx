@@ -525,7 +525,9 @@ function ChatWorkspaceInner({
   const clientThreadId = useRef(thread?.id ?? crypto.randomUUID());
   const workspaceActiveRef = useRef(true);
   const requestInFlightRef = useRef(false);
-  const setMessagesRef = useRef<(messages: UIMessage[]) => void>(() => undefined);
+  const setMessagesRef = useRef<(messages: UIMessage[] | ((messages: UIMessage[]) => UIMessage[])) => void>(
+    () => undefined,
+  );
   const requestThreadId = resolveChatRequestThreadId(thread?.id, clientThreadId.current);
   const controller = usePromptInputController();
   const attachments = useProviderAttachments();
@@ -665,7 +667,18 @@ function ChatWorkspaceInner({
         controller.textInput.setInput(failedExchangeRef.current.text);
       }
     },
-    onFinish: ({ message }) => {
+    onFinish: ({ message, isAbort, isDisconnect, isError }) => {
+      const finalStatus = isAbort ? "cancelled" : isDisconnect || isError ? "failed" : "completed";
+      setMessagesRef.current((currentMessages) =>
+        currentMessages.map((currentMessage) =>
+          currentMessage.id === message.id && currentMessage.role === "assistant"
+            ? {
+                ...currentMessage,
+                metadata: { ...getMessageMetadata(currentMessage), status: finalStatus },
+              }
+            : currentMessage,
+        ),
+      );
       failedExchangeRef.current = null;
       setAssetUploads([]);
       invalidateThreadLists();
@@ -1523,7 +1536,7 @@ function ChatWorkspaceInner({
                   </Alert>
                 </div>
               ) : null}
-              <div className="mx-auto w-full min-w-0 max-w-3xl px-4 py-2 pb-[env(safe-area-inset-bottom)]">
+              <div className="mx-auto w-full min-w-0 max-w-5xl px-4 py-2 pb-[env(safe-area-inset-bottom)]">
                 {droppedAttachmentCount > attachments.files.length ? (
                   <Alert className="mb-2">
                     <AlertTitle>Reattach your files</AlertTitle>

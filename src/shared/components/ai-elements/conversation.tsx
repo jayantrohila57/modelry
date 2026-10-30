@@ -46,7 +46,7 @@ export const ConversationContent = ({ className, ...props }: ConversationContent
       ref={viewportRef ?? undefined}
     >
       <MessageScroller.Content
-        className={cn("mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5 p-4", className)}
+        className={cn("mx-auto flex min-h-full w-full max-w-5xl flex-col gap-5 p-4", className)}
         {...props}
       />
     </MessageScroller.Viewport>
