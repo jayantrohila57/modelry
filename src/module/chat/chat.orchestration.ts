@@ -1,3 +1,4 @@
+import { TRPCError } from "@trpc/server";
 import type { UIMessage } from "ai";
 import type { chatMessage } from "@/core/db/db.schema";
 import { calculateCreditCostFromTokens, getResolvedAiModelForUser } from "@/module/ai/ai.models";
@@ -28,6 +29,7 @@ export async function prepareChatExchange(input: {
   modelId?: string | null;
   requestMessages: UIMessage[];
   additionalPromptContext?: string;
+  webSearch?: boolean;
   threadId?: string | null;
   replay?: { clientMessageId: string; content?: string };
   userId: string;
@@ -39,6 +41,10 @@ export async function prepareChatExchange(input: {
     userId: input.userId,
     modelId: input.modelId,
   });
+
+  if (input.webSearch && resolvedModel.provider !== "google") {
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Web search is currently available for Google models only." });
+  }
 
   const thread = await ensureThreadForRequest({
     userId: input.userId,
@@ -54,9 +60,19 @@ export async function prepareChatExchange(input: {
     model: resolvedModel.id,
   });
 
-  let context = await getThreadContextForAssistant({
+  const replayState = input.replay
+    ? await prepareUserMessageReplay({
+        userId: input.userId,
+        threadId: thread.id,
+        clientMessageId: input.replay.clientMessageId,
+        content: input.replay.content,
+      })
+    : undefined;
+  const context = await getThreadContextForAssistant({
     userId: input.userId,
     threadId: thread.id,
+    throughClientMessageId: replayState?.targetClientMessageId,
+    replacementContent: replayState?.replacementContent,
   });
 
   const basePromptTokens = Math.max(
@@ -84,19 +100,6 @@ export async function prepareChatExchange(input: {
   let assistantMessage: typeof chatMessage.$inferSelect;
 
   try {
-    if (input.replay) {
-      await prepareUserMessageReplay({
-        userId: input.userId,
-        threadId: thread.id,
-        clientMessageId: input.replay.clientMessageId,
-        content: input.replay.content,
-      });
-      context = await getThreadContextForAssistant({
-        userId: input.userId,
-        threadId: thread.id,
-      });
-    }
-
     assistantMessage = await createAssistantPlaceholder({
       userId: input.userId,
       threadId: thread.id,
@@ -123,11 +126,20 @@ export async function prepareChatExchange(input: {
     reservedCredits: reservation.reservedCredits,
     resolvedModel,
     thread,
+    replay: replayState
+      ? {
+          targetMessageId: replayState.targetMessageId,
+          replacementContent: replayState.replacementContent,
+          replacementParts: replayState.replacementParts,
+          followingMessageIds: replayState.followingMessageIds,
+        }
+      : undefined,
   };
 }
 
 export async function finalizeChatExchange(input: {
   content: string;
+  parts?: UIMessage["parts"];
   completionTokens: number;
   messageId: string;
   modelId: string;
@@ -142,6 +154,12 @@ export async function finalizeChatExchange(input: {
   threadId: string;
   totalTokens?: number;
   userId: string;
+  replay?: {
+    targetMessageId: string;
+    replacementContent?: string;
+    replacementParts?: UIMessage["parts"];
+    followingMessageIds: string[];
+  };
 }) {
   const totalTokens = Math.max(
     0,
@@ -162,6 +180,7 @@ export async function finalizeChatExchange(input: {
     threadId: input.threadId,
     messageId: input.messageId,
     content: input.content,
+    parts: input.parts,
     reasoning: input.reasoning,
     reasoningTokens: input.reasoningTokens,
     promptTokens: input.promptTokens,
@@ -172,6 +191,7 @@ export async function finalizeChatExchange(input: {
     model: input.modelId,
     status: input.status,
     summaryVersionUsed: input.summaryVersionUsed,
+    replay: input.replay,
   });
 
   return settlement;

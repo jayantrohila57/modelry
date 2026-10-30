@@ -3,9 +3,11 @@ import type { UIMessage } from "ai";
 export function extractPlainTextFromMessage(message: UIMessage | null | undefined) {
   if (!message) return "";
 
-  return message.parts
-    .filter((part) => part.type === "text")
-    .map((part) => part.text)
+  const parts = Array.isArray(message.parts) ? message.parts : [];
+
+  return parts
+    .filter((part) => part && typeof part === "object" && part.type === "text" && typeof part.text === "string")
+    .map((part) => (part.type === "text" ? part.text : ""))
     .join("\n")
     .trim();
 }

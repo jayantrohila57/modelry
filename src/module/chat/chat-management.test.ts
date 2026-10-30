@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createChat } from "@shadcn/helpers/ai-sdk";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { createRuntimeAiModelId, getRuntimeProviderModelFromId, isRuntimeAiModelId } from "@/module/ai/ai.models";
 import { addAdditionalPromptContextTokens, estimateTokenCount } from "@/module/ai/ai.tokens";
@@ -9,10 +10,18 @@ import {
   normalizeChatSearchQuery,
   resolveChatRequestThreadId,
 } from "@/module/chat/chat.request.utils";
-import { getReasoningLevelTemperature } from "@/module/chat/chat.runtime";
+import { getTemperatureFromPreset } from "@/module/chat/chat.runtime";
 import { pinThreadInputSchema } from "@/module/chat/chat.schema";
-import { buildArchivedThreadDeleteCondition, buildThreadSearchCondition } from "@/module/chat/chat.service";
-import { formatMessageTimestamp, mapPersistedMessagesToUiMessages } from "@/module/chat/chat-message.utils";
+import {
+  buildArchivedThreadDeleteCondition,
+  buildCutoffSafeThreadSummary,
+  buildThreadSearchCondition,
+} from "@/module/chat/chat.service";
+import {
+  formatMessageTimestamp,
+  mapPersistedMessagesToUiMessages,
+  normalizeChatMessageParts,
+} from "@/module/chat/chat-message.utils";
 import {
   clearThreadDraftSnapshot,
   createThreadDraftKey,
@@ -44,6 +53,117 @@ const result = mapPersistedMessagesToUiMessages([
     userId: "user-1",
   },
 ]);
+assert.deepEqual(
+  normalizeChatMessageParts([
+    { type: "text", text: "safe text", ignored: true },
+    {
+      type: "file",
+      url: "/api/assets/00000000-0000-4000-8000-000000000001/download",
+      mediaType: "application/pdf",
+      filename: "safe.pdf",
+    },
+    { type: "file", url: "https://example.com/unsafe.pdf", mediaType: "application/pdf", filename: "unsafe.pdf" },
+    { type: "tool-call", input: { prompt: "unsafe" } },
+    null,
+  ]),
+  [
+    { type: "text", text: "safe text" },
+    {
+      type: "file",
+      url: "/api/assets/00000000-0000-4000-8000-000000000001/download",
+      mediaType: "application/pdf",
+      filename: "safe.pdf",
+    },
+  ],
+);
+assert.deepEqual(normalizeChatMessageParts({ type: "text", text: "not an array" }), []);
+
+const restoredWithLegacyAttachments = mapPersistedMessagesToUiMessages([
+  {
+    clientMessageId: "client-attachment",
+    completionTokens: 0,
+    content: "Review these documents",
+    createdAt: new Date("2026-03-31T10:00:00.000Z"),
+    creditCost: 0,
+    errorMessage: null,
+    finishedAt: null,
+    id: "message-attachment",
+    model: null,
+    parts: [
+      { type: "text", text: "Review these documents" },
+      {
+        type: "file",
+        filename: "current.pdf",
+        mediaType: "application/pdf",
+        url: "/api/assets/00000000-0000-4000-8000-000000000001/download",
+      },
+    ],
+    attachments: [
+      { id: "00000000-0000-4000-8000-000000000001", name: "current.pdf", mimeType: "application/pdf" },
+      { id: "00000000-0000-4000-8000-000000000002", name: "legacy.pdf", mimeType: "application/pdf" },
+    ],
+    promptTokens: 0,
+    provider: null,
+    reasoning: null,
+    reasoningTokens: 0,
+    role: "user",
+    status: "completed",
+    threadId: "thread-1",
+    summaryVersionUsed: 0,
+    totalTokens: 0,
+    updatedAt: new Date("2026-03-31T10:00:00.000Z"),
+    userId: "user-1",
+  },
+])[0];
+assert.equal(restoredWithLegacyAttachments?.parts.filter((part) => part.type === "file").length, 2);
+assert.deepEqual(
+  restoredWithLegacyAttachments?.parts
+    .filter((part) => part.type === "file")
+    .map((part) => (part.type === "file" ? part.url : "")),
+  [
+    "/api/assets/00000000-0000-4000-8000-000000000001/download",
+    "/api/assets/00000000-0000-4000-8000-000000000002/download",
+  ],
+);
+
+const scriptedAiChat = createChat()
+  .user("Find the latest release notes", { id: "fixture-user-message" })
+  .assistant(({ writer }) => {
+    writer
+      .reasoning("Checking the release notes")
+      .text("The release adds message scroller support.")
+      .sourceUrl({ url: "https://example.com/releases", title: "Release notes" });
+  });
+const scriptedAssistant = scriptedAiChat.get()[1];
+assert.ok(scriptedAssistant);
+assert.ok(scriptedAssistant.parts.some((part) => part.type === "reasoning"));
+assert.ok(scriptedAssistant.parts.some((part) => part.type === "source-url"));
+const restoredScriptedAssistant = mapPersistedMessagesToUiMessages([
+  {
+    clientMessageId: null,
+    completionTokens: 8,
+    content: "The release adds message scroller support.",
+    createdAt: new Date("2026-03-31T10:00:00.000Z"),
+    creditCost: 1,
+    errorMessage: null,
+    finishedAt: null,
+    id: "fixture-assistant-message",
+    model: "demo-model",
+    parts: scriptedAssistant.parts,
+    promptTokens: 12,
+    provider: "demo-provider",
+    reasoning: "Checking the release notes",
+    reasoningTokens: 3,
+    role: "assistant",
+    status: "completed",
+    threadId: "thread-1",
+    summaryVersionUsed: 0,
+    totalTokens: 23,
+    updatedAt: new Date("2026-03-31T10:00:00.000Z"),
+    userId: "user-1",
+  },
+])[0];
+assert.deepEqual(restoredScriptedAssistant?.parts, scriptedAssistant.parts);
 
 assert.equal(result.length, 1);
 assert.equal(result[0]?.id, "client-1");
@@ -164,9 +284,20 @@ clearThreadDraftSnapshot(threadKey);
 assert.equal(getThreadDraftSnapshot(threadKey), undefined);
 assert.equal(getThreadDraftSnapshot(landingKey), undefined);
 
-assert.equal(getReasoningLevelTemperature("low"), 0.2);
-assert.equal(getReasoningLevelTemperature("medium"), 0.5);
-assert.equal(getReasoningLevelTemperature("high"), 0.8);
+assert.equal(getTemperatureFromPreset("low"), 0.2);
+assert.equal(getTemperatureFromPreset("medium"), 0.5);
+assert.equal(getTemperatureFromPreset("high"), 0.8);
+
+const replaySummary = buildCutoffSafeThreadSummary(
+  Array.from({ length: 14 }, (_, index) => ({
+    content: `context fact ${index}`,
+    role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+    status: "completed" as const,
+  })),
+);
+assert.match(replaySummary ?? "", /context fact 0/);
+assert.match(replaySummary ?? "", /context fact 1/);
+assert.doesNotMatch(replaySummary ?? "", /context fact 2/);
 
 assert.equal(addAdditionalPromptContextTokens(12, "summary excerpt"), 12 + estimateTokenCount("summary excerpt"));
 

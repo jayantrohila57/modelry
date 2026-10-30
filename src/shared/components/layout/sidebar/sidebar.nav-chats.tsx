@@ -395,13 +395,20 @@ export function NavArchivedChats() {
 
 function ChatSearch() {
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const query = search.trim();
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedSearch(query), 250);
+    return () => window.clearTimeout(timeout);
+  }, [query]);
+
   const searchQuery = apiClient.chat.list.useQuery(
-    { archived: false, limit: 20, offset: 0, search: query },
-    { enabled: query.length > 0, refetchOnWindowFocus: false },
+    { archived: false, limit: 20, offset: 0, search: debouncedSearch },
+    { enabled: debouncedSearch.length > 0, refetchOnWindowFocus: false },
   );
   const results = (getApiResponseData(searchQuery.data) ?? []) as ThreadListItem[];
+  const isWaitingForSearch = query.length > 0 && query !== debouncedSearch;
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -432,7 +439,7 @@ function ChatSearch() {
           value={search}
         />
         {query ? (
-          searchQuery.isPending ? (
+          isWaitingForSearch || searchQuery.isPending ? (
             <SidebarNavSkeleton />
           ) : searchQuery.isError ? (
             <div className="grid gap-2 px-2">

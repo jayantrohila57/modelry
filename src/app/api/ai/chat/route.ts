@@ -1,3 +1,4 @@
+import { google } from "@ai-sdk/google";
 import { TRPCError } from "@trpc/server";
 import { convertToModelMessages, type LanguageModelUsage, streamText, type UIMessage } from "ai";
 import { z } from "zod/v3";
@@ -8,8 +9,13 @@ import { extractPlainTextFromMessage } from "@/module/ai/ai.tokens";
 import { findRelevantAssetChunks } from "@/module/assets/assets.ingestion";
 import { linkAssetsToThread, validateAssetsForChat } from "@/module/assets/assets.service";
 import { finalizeChatExchange, prepareChatExchange } from "@/module/chat/chat.orchestration";
-import { type ChatReasoningLevel, getReasoningLevelTemperature } from "@/module/chat/chat.runtime";
+import {
+  type ChatReasoningEffort,
+  type ChatTemperaturePreset,
+  getTemperatureFromPreset,
+} from "@/module/chat/chat.runtime";
 import { failAssistantMessage } from "@/module/chat/chat.service";
+import { normalizeChatMessageParts } from "@/module/chat/chat-message.utils";
 import { settleReservedCredits } from "@/module/credits/credits.service";
 import { jsonFailure } from "@/shared/config/api.utils";
 import { debugError } from "@/shared/utils/lib/logger.utils";
@@ -23,11 +29,23 @@ const requestSchema = z.object({
   threadId: z.string().uuid().optional(),
   model: z.string().trim().min(1).max(240).optional(),
   reasoningEnabled: z.boolean().optional(),
-  reasoningLevel: z.enum(["low", "medium", "high"]).optional(),
+  reasoningEffort: z.enum(["low", "medium", "high"]).optional(),
+  temperaturePreset: z.enum(["low", "medium", "high"]).optional(),
   webSearch: z.boolean().optional(),
   assetIds: z.array(z.string().uuid()).max(5).optional().default([]),
   operation: z.enum(["edit", "regenerate"]).optional(),
-  messages: z.array(z.custom<UIMessage>()).min(1),
+  messages: z
+    .array(
+      z
+        .object({
+          id: z.string().min(1).max(128),
+          role: z.enum(["system", "user", "assistant", "tool"]),
+          parts: z.unknown().optional(),
+        })
+        .passthrough()
+        .transform((message) => ({ ...message, parts: normalizeChatMessageParts(message.parts) }) as UIMessage),
+    )
+    .min(1),
 });
 
 function buildErrorResponse(error: unknown) {
@@ -84,18 +102,21 @@ function buildErrorResponse(error: unknown) {
   });
 }
 
-function getReasoningPreference(input: {
+function getGenerationPreferences(input: {
   reasoningEnabled?: boolean;
-  reasoningLevel?: ChatReasoningLevel;
+  reasoningEffort?: ChatReasoningEffort;
+  temperaturePreset?: ChatTemperaturePreset;
   supportsReasoning: boolean;
 }) {
   const reasoningEnabled = Boolean(input.reasoningEnabled) && input.supportsReasoning;
-  const reasoningLevel = input.reasoningLevel ?? "medium";
+  const reasoningEffort = input.reasoningEffort ?? "medium";
+  const temperaturePreset = input.temperaturePreset ?? "medium";
 
   return {
     reasoningEnabled,
-    reasoningLevel,
-    temperature: getReasoningLevelTemperature(reasoningLevel),
+    reasoningEffort,
+    temperaturePreset,
+    temperature: getTemperatureFromPreset(temperaturePreset),
   };
 }
 
@@ -135,7 +156,17 @@ export async function POST(req: Request) {
       });
     }
 
-    const { messages, threadId, model, reasoningEnabled, reasoningLevel, webSearch, assetIds, operation } = parsed.data;
+    const {
+      messages,
+      threadId,
+      model,
+      reasoningEnabled,
+      reasoningEffort,
+      temperaturePreset,
+      webSearch,
+      assetIds,
+      operation,
+    } = parsed.data;
     const latestUserMessage = [...messages].reverse().find((message) => message.role === "user");
 
     if (!latestUserMessage) {
@@ -193,6 +224,7 @@ export async function POST(req: Request) {
       modelId: model,
       requestMessages: messages,
       additionalPromptContext,
+      webSearch,
       threadId,
       replay: operation
         ? {
@@ -202,9 +234,10 @@ export async function POST(req: Request) {
         : undefined,
       userId: user.id,
     });
-    const reasoningPreference = getReasoningPreference({
+    const generationPreferences = getGenerationPreferences({
       reasoningEnabled,
-      reasoningLevel,
+      reasoningEffort,
+      temperaturePreset,
       supportsReasoning: prepared.resolvedModel.supportsReasoning,
     });
 
@@ -223,12 +256,22 @@ export async function POST(req: Request) {
 
       const result = streamText({
         model: getChatModel(prepared.resolvedModel.providerModel, prepared.resolvedModel.provider),
+        ...(webSearch ? { tools: { google_search: google.tools.googleSearch({}) } } : {}),
         providerOptions:
           prepared.resolvedModel.provider === "ollama"
-            ? { ollama: { think: reasoningPreference.reasoningEnabled } }
-            : {},
+            ? { ollama: { think: generationPreferences.reasoningEnabled } }
+            : prepared.resolvedModel.provider === "google" && generationPreferences.reasoningEnabled
+              ? {
+                  google: {
+                    thinkingConfig: {
+                      thinkingLevel: generationPreferences.reasoningEffort,
+                      includeThoughts: true,
+                    },
+                  },
+                }
+              : {},
         messages: await convertToModelMessages(prepared.context.messages),
-        temperature: reasoningPreference.temperature,
+        temperature: generationPreferences.temperature,
         abortSignal: req.signal,
       });
 
@@ -262,8 +305,9 @@ export async function POST(req: Request) {
           promptTokens,
           provider: prepared.resolvedModel.provider,
           reasoning: reasoning ?? undefined,
-          reasoningEnabled: reasoningPreference.reasoningEnabled,
-          reasoningLevel: reasoningPreference.reasoningLevel,
+          reasoningEnabled: generationPreferences.reasoningEnabled,
+          reasoningEffort: generationPreferences.reasoningEffort,
+          temperaturePreset: generationPreferences.temperaturePreset,
           reasoningTokens,
           status: "completed",
           summaryVersionUsed: prepared.context.summaryVersion,
@@ -282,8 +326,9 @@ export async function POST(req: Request) {
               model: prepared.resolvedModel.id,
               persistedMessageId: prepared.assistantMessage.id,
               provider: prepared.resolvedModel.provider,
-              reasoningEnabled: reasoningPreference.reasoningEnabled,
-              reasoningLevel: reasoningPreference.reasoningLevel,
+              reasoningEnabled: generationPreferences.reasoningEnabled,
+              reasoningEffort: generationPreferences.reasoningEffort,
+              temperaturePreset: generationPreferences.temperaturePreset,
               reservedCredits: prepared.reservedCredits,
               status: prepared.assistantMessage.status,
               threadId: prepared.thread.id,
@@ -296,7 +341,7 @@ export async function POST(req: Request) {
 
           return undefined;
         },
-        sendReasoning: reasoningPreference.reasoningEnabled,
+        sendReasoning: generationPreferences.reasoningEnabled,
         onError: (error) => (error instanceof Error ? error.message : "Failed to stream chat response."),
         onFinish: async ({ isAborted, responseMessage }) => {
           const usage = await usagePromise.current;
@@ -318,20 +363,22 @@ export async function POST(req: Request) {
 
           await finalizeChatExchange({
             content,
+            parts: responseMessage.parts,
             completionTokens,
             creditMultiplierBps: prepared.resolvedModel.creditMultiplierBps,
             messageId: prepared.assistantMessage.id,
             modelId: prepared.resolvedModel.id,
             promptTokens,
             provider: prepared.resolvedModel.provider,
-            reasoning: reasoningPreference.reasoningEnabled ? (reasoning ?? null) : null,
-            reasoningTokens: reasoningPreference.reasoningEnabled ? reasoningTokens : 0,
+            reasoning: generationPreferences.reasoningEnabled ? (reasoning ?? null) : null,
+            reasoningTokens: generationPreferences.reasoningEnabled ? reasoningTokens : 0,
             reservedCredits: prepared.reservedCredits,
             status: isAborted ? "cancelled" : "completed",
             summaryVersionUsed: prepared.context.summaryVersion,
             threadId: prepared.thread.id,
             totalTokens: reportedTotalTokens,
             userId: user.id,
+            replay: prepared.replay,
           });
         },
       });
@@ -344,6 +391,7 @@ export async function POST(req: Request) {
         errorMessage: error instanceof Error ? error.message : "Unknown chat generation error",
         provider: prepared.resolvedModel.provider,
         model: prepared.resolvedModel.id,
+        removePlaceholder: Boolean(operation),
       });
 
       if (prepared.reservedCredits > 0) {

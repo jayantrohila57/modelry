@@ -4,6 +4,7 @@ import {
   archiveThreadInputSchema,
   createThreadInputSchema,
   deleteThreadInputSchema,
+  getOlderThreadMessagesInputSchema,
   getThreadInputSchema,
   listThreadsInputSchema,
   pinThreadInputSchema,
@@ -14,6 +15,7 @@ import {
   archiveThread,
   createThread,
   deleteThread,
+  getOlderThreadMessages,
   getThread,
   listThreads,
   renameThread,
@@ -38,6 +40,17 @@ export const chatRouter = createTRPCRouter({
     .query(async ({ ctx, input }) =>
       withApiSuccess(await getThread(ctx.user.id, input.threadId), "Thread retrieved successfully."),
     ),
+  olderMessages: protectedProcedure.input(getOlderThreadMessagesInputSchema).query(async ({ ctx, input }) =>
+    withApiSuccess(
+      await getOlderThreadMessages({
+        userId: ctx.user.id,
+        threadId: input.threadId,
+        beforeMessageId: input.beforeMessageId,
+        limit: input.limit,
+      }),
+      "Earlier chat messages retrieved successfully.",
+    ),
+  ),
   models: protectedProcedure.query(async ({ ctx }) =>
     withApiSuccess(await listAllowedAiModelsForUser(ctx.user.id), "Allowed chat models retrieved successfully."),
   ),

@@ -9,7 +9,6 @@ import { Button } from "@/shared/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/shared/components/ui/sheet";
 import { useIsMobile } from "@/shared/utils/hooks/use-mobile";
 import { cn } from "@/shared/utils/lib/utils";
-import type { ChatReasoningLevel } from "./chat.runtime";
 
 type AllowedModelLike = {
   displayName: string;
@@ -35,8 +34,6 @@ type ChatMetaRailProps = {
   onRestore: () => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  reasoningEnabled: boolean;
-  reasoningLevel: ChatReasoningLevel;
   selectedModel?: AllowedModelLike;
   thread?: {
     id: string;
