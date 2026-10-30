@@ -397,6 +397,54 @@ export async function persistUserMessage(input: {
     });
 }
 
+export async function prepareUserMessageReplay(input: {
+  userId: string;
+  threadId: string;
+  clientMessageId: string;
+  content?: string;
+}) {
+  await requireOwnedThread(input.userId, input.threadId);
+
+  const replayedMessage = await db.transaction(async (tx) => {
+    const messages = await tx.query.chatMessage.findMany({
+      where: eq(chatMessage.threadId, input.threadId),
+      orderBy: asc(chatMessage.createdAt),
+    });
+    const targetIndex = messages.findIndex((message) => message.clientMessageId === input.clientMessageId);
+    const target = messages[targetIndex];
+
+    if (!target || target.role !== "user") {
+      throw new TRPCError({ code: "NOT_FOUND", message: "The message to retry was not found." });
+    }
+
+    const followingMessages = messages.slice(targetIndex + 1);
+    if (followingMessages.length > 0) {
+      await tx.delete(chatMessage).where(
+        inArray(
+          chatMessage.id,
+          followingMessages.map((message) => message.id),
+        ),
+      );
+    }
+
+    if (input.content !== undefined) {
+      await tx
+        .update(chatMessage)
+        .set({ content: input.content, status: "completed", errorMessage: null, finishedAt: new Date() })
+        .where(eq(chatMessage.id, target.id));
+    }
+
+    await tx
+      .update(chatThread)
+      .set({ lastMessageAt: new Date(), summary: null, summaryVersion: 0, summaryUpdatedAt: null })
+      .where(eq(chatThread.id, input.threadId));
+    return { ...target, content: input.content ?? target.content };
+  });
+
+  await refreshThreadSummary(input.threadId);
+  return replayedMessage;
+}
+
 export async function createAssistantPlaceholder(input: {
   userId: string;
   threadId: string;

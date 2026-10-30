@@ -9,7 +9,7 @@ import { findRelevantAssetChunks } from "@/module/assets/assets.ingestion";
 import { linkAssetsToThread, validateAssetsForChat } from "@/module/assets/assets.service";
 import { finalizeChatExchange, prepareChatExchange } from "@/module/chat/chat.orchestration";
 import { type ChatReasoningLevel, getReasoningLevelTemperature } from "@/module/chat/chat.runtime";
-import { failAssistantMessage } from "@/module/chat/chat.service";
+import { failAssistantMessage, prepareUserMessageReplay } from "@/module/chat/chat.service";
 import { settleReservedCredits } from "@/module/credits/credits.service";
 import { jsonFailure } from "@/shared/config/api.utils";
 import { debugError } from "@/shared/utils/lib/logger.utils";
@@ -26,6 +26,7 @@ const requestSchema = z.object({
   reasoningLevel: z.enum(["low", "medium", "high"]).optional(),
   webSearch: z.boolean().optional(),
   assetIds: z.array(z.string().uuid()).max(5).optional().default([]),
+  operation: z.enum(["edit", "regenerate"]).optional(),
   messages: z.array(z.custom<UIMessage>()).min(1),
 });
 
@@ -134,7 +135,7 @@ export async function POST(req: Request) {
       });
     }
 
-    const { messages, threadId, model, reasoningEnabled, reasoningLevel, webSearch, assetIds } = parsed.data;
+    const { messages, threadId, model, reasoningEnabled, reasoningLevel, webSearch, assetIds, operation } = parsed.data;
     const latestUserMessage = [...messages].reverse().find((message) => message.role === "user");
 
     if (!latestUserMessage) {
@@ -148,6 +149,26 @@ export async function POST(req: Request) {
     }
 
     await validateAssetsForChat(user.id, assetIds);
+
+    if (operation) {
+      if (!threadId) {
+        return jsonFailure({
+          message: "Save this conversation before retrying a message.",
+          code: "BAD_REQUEST",
+          kind: "validation",
+          httpStatus: 400,
+          status: "failed",
+        });
+      }
+
+      await prepareUserMessageReplay({
+        userId: user.id,
+        threadId,
+        clientMessageId: latestUserMessage.id,
+        content: operation === "edit" ? extractPlainTextFromMessage(latestUserMessage) : undefined,
+      });
+    }
+
     let relevantChunks: Awaited<ReturnType<typeof findRelevantAssetChunks>> = [];
     try {
       relevantChunks = await findRelevantAssetChunks({

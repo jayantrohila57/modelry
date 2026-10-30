@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { apiClient, getApiErrorMessage, getApiResponseData, getApiResponseMessage } from "@/core/api/api.client";
 import { CHAT_ARCHIVED_THREADS_LIMIT, CHAT_RECENT_THREADS_LIMIT } from "@/module/chat/chat.data";
-import { groupThreadsByActivity } from "@/module/chat/chat.navigation";
+import { announceChatChange, groupThreadsByActivity } from "@/module/chat/chat.navigation";
 import { PATH } from "@/shared/config/routes";
 import {
   AlertDialog,
@@ -49,6 +49,7 @@ function useInvalidateThreadLists() {
   const utils = apiClient.useUtils();
 
   return () => {
+    announceChatChange();
     void utils.chat.list.invalidate({ archived: false, limit: CHAT_RECENT_THREADS_LIMIT });
     void utils.chat.list.invalidate({ archived: true, limit: CHAT_RECENT_THREADS_LIMIT });
   };
@@ -330,6 +331,22 @@ function ThreadGroup({ archived, label }: { archived: boolean; label: string }) 
     return <SidebarNavSkeleton archived={archived} />;
   }
 
+  if (threadsQuery.isError) {
+    return (
+      <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+        <SidebarGroupLabel>{label}</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <p className="px-2 text-xs text-destructive" role="alert">
+            Could not load chats.
+          </p>
+          <Button className="mt-2" onClick={() => void threadsQuery.refetch()} size="sm" type="button" variant="ghost">
+            Retry
+          </Button>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    );
+  }
+
   if (threads.length === 0) {
     return null;
   }
@@ -418,9 +435,14 @@ function ChatSearch() {
           searchQuery.isPending ? (
             <SidebarNavSkeleton />
           ) : searchQuery.isError ? (
-            <p className="px-2 text-xs text-destructive" role="alert">
-              {getApiErrorMessage(searchQuery.error, "Could not search conversations.")}
-            </p>
+            <div className="grid gap-2 px-2">
+              <p className="text-xs text-destructive" role="alert">
+                {getApiErrorMessage(searchQuery.error, "Could not search conversations.")}
+              </p>
+              <Button onClick={() => void searchQuery.refetch()} size="sm" type="button" variant="ghost">
+                Retry search
+              </Button>
+            </div>
           ) : results.length ? (
             <SidebarMenu>
               {results.map((thread) => (
