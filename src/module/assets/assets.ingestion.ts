@@ -217,6 +217,7 @@ export async function findRelevantAssetChunks(input: {
   let attached: Array<{
     assetId: string;
     name: string;
+    summary: string | null;
     content: string;
     similarity: number;
     explicitlyAttached: boolean;
@@ -226,7 +227,7 @@ export async function findRelevantAssetChunks(input: {
       await Promise.all(
         assetIds.map(async (assetId) => {
           const result = await db.execute(sql`
-        select c.asset_id as "assetId", a.name as "name", c.content as "content",
+        select c.asset_id as "assetId", a.name as "name", a.summary as "summary", c.content as "content",
           1 - (c.embedding <=> ${vector}::vector) as "similarity", true as "explicitlyAttached"
         from asset_chunk c
         inner join chat_attachment a on a.id = c.asset_id
@@ -238,6 +239,7 @@ export async function findRelevantAssetChunks(input: {
           return result.rows as Array<{
             assetId: string;
             name: string;
+            summary: string | null;
             content: string;
             similarity: number;
             explicitlyAttached: boolean;
@@ -248,7 +250,7 @@ export async function findRelevantAssetChunks(input: {
   }
 
   const result = await db.execute(sql`
-    select c.asset_id as "assetId", a.name as "name", c.content as "content",
+    select c.asset_id as "assetId", a.name as "name", a.summary as "summary", c.content as "content",
       1 - (c.embedding <=> ${vector}::vector) as "similarity", false as "explicitlyAttached"
     from asset_chunk c
     inner join chat_attachment a on a.id = c.asset_id
@@ -261,6 +263,7 @@ export async function findRelevantAssetChunks(input: {
     result.rows as Array<{
       assetId: string;
       name: string;
+      summary: string | null;
       content: string;
       similarity: number;
       explicitlyAttached: boolean;

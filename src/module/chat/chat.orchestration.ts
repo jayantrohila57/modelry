@@ -1,7 +1,12 @@
 import type { UIMessage } from "ai";
 import type { chatMessage } from "@/core/db/db.schema";
 import { calculateCreditCostFromTokens, getResolvedAiModelForUser } from "@/module/ai/ai.models";
-import { estimateCreditReservation, estimateTokenCount, estimateTokensFromMessages } from "@/module/ai/ai.tokens";
+import {
+  addAdditionalPromptContextTokens,
+  estimateCreditReservation,
+  estimateTokenCount,
+  estimateTokensFromMessages,
+} from "@/module/ai/ai.tokens";
 import {
   createAssistantPlaceholder,
   ensureThreadForRequest,
@@ -21,6 +26,7 @@ export async function prepareChatExchange(input: {
   latestUserMessage: UIMessage;
   modelId?: string | null;
   requestMessages: UIMessage[];
+  additionalPromptContext?: string;
   threadId?: string | null;
   userId: string;
 }) {
@@ -51,11 +57,12 @@ export async function prepareChatExchange(input: {
     threadId: thread.id,
   });
 
-  const estimatedPromptTokens = Math.max(
+  const basePromptTokens = Math.max(
     estimateTokensFromMessages(input.requestMessages),
     estimateTokensFromMessages(context.messages),
     estimateTokenCount(persistedUserMessage.content),
   );
+  const estimatedPromptTokens = addAdditionalPromptContextTokens(basePromptTokens, input.additionalPromptContext ?? "");
 
   const estimatedCredits = calculateCreditCostFromTokens(estimatedPromptTokens, resolvedModel.creditMultiplierBps);
   const reservedCreditsAmount = estimateCreditReservation(

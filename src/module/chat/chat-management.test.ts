@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createRuntimeAiModelId, getRuntimeProviderModelFromId, isRuntimeAiModelId } from "@/module/ai/ai.models";
+import { addAdditionalPromptContextTokens, estimateTokenCount } from "@/module/ai/ai.tokens";
 import { getReasoningLevelTemperature } from "@/module/chat/chat.runtime";
 import { mapPersistedMessagesToUiMessages } from "@/module/chat/chat-message.utils";
 import {
@@ -104,6 +105,8 @@ assert.deepEqual(getThreadDraftSnapshot(landingKey), {
 assert.equal(getReasoningLevelTemperature("low"), 0.2);
 assert.equal(getReasoningLevelTemperature("medium"), 0.5);
 assert.equal(getReasoningLevelTemperature("high"), 0.8);
+
+assert.equal(addAdditionalPromptContextTokens(12, "summary excerpt"), 12 + estimateTokenCount("summary excerpt"));
 
 const runtimeModelId = createRuntimeAiModelId("llama3.2:latest");
 assert.equal(runtimeModelId, "runtime:ollama:llama3.2%3Alatest");
