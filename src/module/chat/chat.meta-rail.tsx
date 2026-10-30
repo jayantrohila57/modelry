@@ -139,11 +139,11 @@ export function ChatMetaRail({ open, onOpenChange, ...props }: ChatMetaRailProps
   return (
     <aside
       className={cn(
-        "hidden h-full border-l bg-background transition-all duration-200 ease-out xl:flex",
-        open ? "w-[340px] translate-x-0 opacity-100" : "w-0 translate-x-6 opacity-0",
+        "hidden h-full min-w-0 overflow-hidden border-l bg-background transition-[width,opacity,transform] duration-200 ease-out xl:flex",
+        open ? "w-[340px] translate-x-0 opacity-100" : "w-0 translate-x-6 border-l-0 opacity-0",
       )}
     >
-      <div className={cn("min-w-[340px] flex-1", open ? "pointer-events-auto" : "pointer-events-none")}>
+      <div className={cn("min-w-0 flex-1", open ? "pointer-events-auto" : "pointer-events-none")}>
         <RailBody {...props} />
       </div>
     </aside>

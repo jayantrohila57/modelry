@@ -1250,7 +1250,7 @@ function ChatWorkspaceInner({
     <Shell>
       <Shell.Section
         className={cn(
-          "grid size-full w-full max-w-none grid-cols-1 px-0",
+          "grid size-full min-w-0 w-full max-w-none grid-cols-1 overflow-hidden px-0",
           !isMobile && detailsOpen
             ? "xl:grid-cols-[minmax(0,1fr)_minmax(0,340px)]"
             : "xl:grid-cols-[minmax(0,1fr)_0px]",
@@ -1469,10 +1469,10 @@ function ChatWorkspaceInner({
               </ConversationContent>
               <ConversationScrollButton />
             </Conversation>
-            <div className="grid shrink-0 gap-4 pt-4">
+            <div className="grid min-w-0 max-w-full shrink-0 gap-4 pt-4">
               {/* Show suggestions only when no messages and not archived */}
               {renderedMessages.length === 0 && !isArchived ? (
-                <div className="px-4 pb-2">
+                <div className="min-w-0 max-w-full overflow-hidden px-4 pb-2">
                   <p className="text-muted-foreground mb-2 text-xs">Try asking:</p>
                   <Suggestions>
                     {chatSuggestions.map((suggestion) => (
@@ -1495,7 +1495,7 @@ function ChatWorkspaceInner({
                   </Alert>
                 </div>
               ) : null}
-              <div className="mx-auto w-full max-w-3xl px-4 py-2 pb-[env(safe-area-inset-bottom)]">
+              <div className="mx-auto w-full min-w-0 max-w-3xl px-4 py-2 pb-[env(safe-area-inset-bottom)]">
                 {droppedAttachmentCount > attachments.files.length ? (
                   <Alert className="mb-2">
                     <AlertTitle>Reattach your files</AlertTitle>

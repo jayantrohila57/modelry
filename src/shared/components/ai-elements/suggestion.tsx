@@ -9,8 +9,8 @@ import { cn } from "@/shared/utils/lib/utils";
 export type SuggestionsProps = ComponentProps<typeof ScrollArea>;
 
 export const Suggestions = ({ className, children, ...props }: SuggestionsProps) => (
-  <ScrollArea className="w-full overflow-x-auto whitespace-nowrap" {...props}>
-    <div className={cn("flex w-max flex-nowrap items-center gap-2", className)}>{children}</div>
+  <ScrollArea className="min-w-0 w-full max-w-full overflow-x-auto whitespace-nowrap" {...props}>
+    <div className={cn("flex w-max min-w-0 flex-nowrap items-center gap-2", className)}>{children}</div>
     <ScrollBar className="hidden" orientation="horizontal" />
   </ScrollArea>
 );
