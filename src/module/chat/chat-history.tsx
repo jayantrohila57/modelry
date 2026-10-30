@@ -3,6 +3,7 @@ import type { Route } from "next";
 import { redirect } from "next/navigation";
 import { apiServer } from "@/core/api/api.server";
 import { getServerSession } from "@/core/auth/auth.server";
+import { getSignInDestination } from "@/module/auth/auth.callback";
 import { normalizeChatSearchQuery } from "@/module/chat/chat.request.utils";
 import { Button } from "@/shared/components/ui/button";
 import { Input } from "@/shared/components/ui/input";
@@ -19,7 +20,7 @@ export async function ChatHistoryPage({
   searchParams: Promise<{ offset?: string | string[]; q?: string | string[] }>;
 }) {
   const [{ offset: rawOffset, q: rawQuery }, { session }] = await Promise.all([searchParams, getServerSession()]);
-  if (!session) redirect("/auth/sign-in");
+  if (!session) redirect(getSignInDestination(archived ? PATH.CHAT.ARCHIVE : PATH.CHAT.ALL));
 
   const search = normalizeChatSearchQuery(rawQuery);
   const offsetValue = Array.isArray(rawOffset) ? rawOffset[0] : rawOffset;

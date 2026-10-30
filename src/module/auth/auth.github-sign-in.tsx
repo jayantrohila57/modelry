@@ -6,11 +6,12 @@ import { useTransition } from "react";
 import { toast } from "sonner";
 import { signIn } from "@/core/auth/auth.client";
 import { SUPPORTED_OAUTH_PROVIDER_DETAILS } from "@/core/auth/auth.providers";
+import { getSafePostSignInCallback } from "@/module/auth/auth.callback";
 import { Button } from "@/shared/components/ui/button";
 import { PATH } from "@/shared/config/routes";
 import { debugError } from "@/shared/utils/lib/logger.utils";
 
-export function GitHubSignIn() {
+export function GitHubSignIn({ callbackURL = PATH.CHAT.ROOT }: { callbackURL?: string }) {
   const [isLoading, startTransition] = useTransition();
   // const router = useRouter();
 
@@ -20,7 +21,7 @@ export function GitHubSignIn() {
       try {
         await signIn.social({
           provider: "github",
-          callbackURL: PATH.CHAT.ROOT,
+          callbackURL: getSafePostSignInCallback(callbackURL),
         });
         toast.success("Signed in successfully", { id: toastId });
       } catch (error) {

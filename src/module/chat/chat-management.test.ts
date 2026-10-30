@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { createRuntimeAiModelId, getRuntimeProviderModelFromId, isRuntimeAiModelId } from "@/module/ai/ai.models";
+import { getSafePostSignInCallback } from "@/module/auth/auth.callback";
 import { addAdditionalPromptContextTokens, estimateTokenCount } from "@/module/ai/ai.tokens";
 import { getReasoningLevelTemperature } from "@/module/chat/chat.runtime";
 import { mapPersistedMessagesToUiMessages } from "@/module/chat/chat-message.utils";
@@ -94,6 +95,9 @@ assert.deepEqual(getThreadDraftSnapshot(landingKey), {
 assert.match(getNewChatDestination(), /^\/chat\?new=\d+$/);
 assert.equal(createChatWorkspaceKey("thread-123", false), "thread-123:active");
 assert.equal(createChatWorkspaceKey("thread-123", true), "thread-123:archived");
+assert.equal(getSafePostSignInCallback("/chat/all?q=quarterly"), "/chat/all?q=quarterly");
+assert.equal(getSafePostSignInCallback("//attacker.example"), "/chat");
+assert.equal(getSafePostSignInCallback("/safe/..//attacker.example"), "/chat");
 assert.equal(resolveChatRequestThreadId(undefined, "client-thread-id"), "client-thread-id");
 assert.equal(resolveChatRequestThreadId("persisted-thread-id", "client-thread-id"), "persisted-thread-id");
 assert.equal(normalizeChatSearchQuery(["first phrase", "ignored phrase"]), "first phrase");
