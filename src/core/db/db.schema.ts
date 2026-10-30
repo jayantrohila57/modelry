@@ -1,5 +1,25 @@
-import { relations } from "drizzle-orm";
-import { bigint, boolean, index, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { relations, sql } from "drizzle-orm";
+import {
+  bigint,
+  boolean,
+  customType,
+  foreignKey,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  unique,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
+
+const vector768 = customType<{ data: number[]; driverData: string }>({
+  dataType: () => "vector(768)",
+  fromDriver: (value) => value.slice(1, -1).split(",").map(Number),
+  toDriver: (value) => `[${value.join(",")}]`,
+});
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -120,6 +140,22 @@ export const media = pgTable("media", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 });
 
+export const assetFolder = pgTable(
+  "asset_folder",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    ...timestamps,
+  },
+  (table) => ({
+    byUserNameUniqueIdx: uniqueIndex("asset_folder_user_name_unique_idx").on(table.userId, table.name),
+    byUserCreatedIdx: index("asset_folder_user_created_idx").on(table.userId, table.createdAt),
+  }),
+);
+
 export const chatThread = pgTable(
   "chat_thread",
   {
@@ -220,12 +256,82 @@ export const chatAttachment = pgTable(
     mimeType: text("mime_type").notNull(),
     sizeBytes: integer("size_bytes").notNull().default(0),
     status: text("status").$type<"uploaded" | "attached" | "orphaned" | "deleted">().default("uploaded").notNull(),
+    pathname: text("pathname"),
+    fileType: text("file_type").notNull().default("other"),
+    category: text("category").notNull().default("Uncategorized"),
+    folderId: text("folder_id").references(() => assetFolder.id, { onDelete: "set null" }),
+    summary: text("summary"),
+    extractedText: text("extracted_text"),
+    extractedMetadata: jsonb("extracted_metadata").$type<Record<string, unknown>>(),
+    processingStatus: text("processing_status")
+      .$type<"queued" | "uploading" | "extracting" | "embedding" | "ready" | "failed">()
+      .notNull()
+      .default("queued"),
+    processingProgress: integer("processing_progress").notNull().default(0),
+    processingError: text("processing_error"),
+    processingStartedAt: timestamp("processing_started_at", { withTimezone: true }),
+    indexedAt: timestamp("indexed_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => ({
+    assetOwnerUnique: unique("chat_attachment_id_user_unique").on(table.id, table.userId),
     byUserIdx: index("chat_attachment_user_idx").on(table.userId, table.createdAt),
     byThreadIdx: index("chat_attachment_thread_idx").on(table.threadId, table.createdAt),
     byMessageIdx: index("chat_attachment_message_idx").on(table.messageId),
+    byUserCategoryIdx: index("chat_attachment_user_category_idx").on(table.userId, table.category, table.createdAt),
+    byUserFileTypeIdx: index("chat_attachment_user_file_type_idx").on(table.userId, table.fileType),
+    byUserFolderIdx: index("chat_attachment_user_folder_idx").on(table.userId, table.folderId),
+    byUserProcessingIdx: index("chat_attachment_user_processing_idx").on(table.userId, table.processingStatus),
+    pathnameUniqueIdx: uniqueIndex("chat_attachment_pathname_unique_idx")
+      .on(table.pathname)
+      .where(sql`${table.pathname} is not null`),
+  }),
+);
+
+export const chatMessageAsset = pgTable(
+  "chat_message_asset",
+  {
+    messageId: text("message_id")
+      .notNull()
+      .references(() => chatMessage.id, { onDelete: "cascade" }),
+    assetId: text("asset_id").notNull(),
+    userId: text("user_id").notNull(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => chatThread.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.messageId, table.assetId] }),
+    assetOwnerFk: foreignKey({
+      name: "chat_message_asset_owner_fk",
+      columns: [table.assetId, table.userId],
+      foreignColumns: [chatAttachment.id, chatAttachment.userId],
+    }).onDelete("cascade"),
+    byThreadIdx: index("chat_message_asset_thread_idx").on(table.threadId, table.messageId),
+    byAssetIdx: index("chat_message_asset_asset_idx").on(table.assetId),
+  }),
+);
+
+export const assetChunk = pgTable(
+  "asset_chunk",
+  {
+    id: text("id").primaryKey(),
+    assetId: text("asset_id").notNull().notNull(),
+    userId: text("user_id").notNull(),
+    chunkIndex: integer("chunk_index").notNull(),
+    content: text("content").notNull(),
+    embedding: vector768("embedding").notNull(),
+    ...timestamps,
+  },
+  (table) => ({
+    assetOwnerFk: foreignKey({
+      name: "asset_chunk_asset_owner_fk",
+      columns: [table.assetId, table.userId],
+      foreignColumns: [chatAttachment.id, chatAttachment.userId],
+    }).onDelete("cascade"),
+    assetChunkUniqueIdx: uniqueIndex("asset_chunk_asset_index_unique_idx").on(table.assetId, table.chunkIndex),
+    byUserIdx: index("asset_chunk_user_idx").on(table.userId),
   }),
 );
 
@@ -444,6 +550,19 @@ export const userRelations = relations(user, ({ many, one }) => ({
   }),
   threads: many(chatThread),
   subscriptions: many(subscription),
+  assetFolders: many(assetFolder),
+  assets: many(chatAttachment),
+  assetChunks: many(assetChunk),
+}));
+
+export const assetFolderRelations = relations(assetFolder, ({ one, many }) => ({
+  user: one(user, { fields: [assetFolder.userId], references: [user.id] }),
+  assets: many(chatAttachment),
+}));
+
+export const assetChunkRelations = relations(assetChunk, ({ one }) => ({
+  asset: one(chatAttachment, { fields: [assetChunk.assetId], references: [chatAttachment.id] }),
+  user: one(user, { fields: [assetChunk.userId], references: [user.id] }),
 }));
 
 export const chatThreadRelations = relations(chatThread, ({ one, many }) => ({
@@ -453,6 +572,7 @@ export const chatThreadRelations = relations(chatThread, ({ one, many }) => ({
   }),
   messages: many(chatMessage),
   attachments: many(chatAttachment),
+  messageAssets: many(chatMessageAsset),
 }));
 
 export const chatMessageRelations = relations(chatMessage, ({ one, many }) => ({
@@ -465,9 +585,16 @@ export const chatMessageRelations = relations(chatMessage, ({ one, many }) => ({
     references: [user.id],
   }),
   attachments: many(chatAttachment),
+  assets: many(chatMessageAsset),
 }));
 
-export const chatAttachmentRelations = relations(chatAttachment, ({ one }) => ({
+export const chatMessageAssetRelations = relations(chatMessageAsset, ({ one }) => ({
+  message: one(chatMessage, { fields: [chatMessageAsset.messageId], references: [chatMessage.id] }),
+  asset: one(chatAttachment, { fields: [chatMessageAsset.assetId], references: [chatAttachment.id] }),
+  thread: one(chatThread, { fields: [chatMessageAsset.threadId], references: [chatThread.id] }),
+}));
+
+export const chatAttachmentRelations = relations(chatAttachment, ({ one, many }) => ({
   user: one(user, {
     fields: [chatAttachment.userId],
     references: [user.id],
@@ -484,6 +611,8 @@ export const chatAttachmentRelations = relations(chatAttachment, ({ one }) => ({
     fields: [chatAttachment.mediaId],
     references: [media.id],
   }),
+  folder: one(assetFolder, { fields: [chatAttachment.folderId], references: [assetFolder.id] }),
+  chunks: many(assetChunk),
 }));
 
 export const creditWalletRelations = relations(creditWallet, ({ one, many }) => ({

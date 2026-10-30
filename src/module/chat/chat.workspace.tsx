@@ -16,7 +16,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   apiClient,
@@ -26,6 +26,9 @@ import {
   type RouterOutputs,
   type UnwrapApiData,
 } from "@/core/api/api.client";
+import { AssetFileIcon } from "@/module/assets/asset-file-icon";
+import { AssetUploadSteps } from "@/module/assets/asset-upload-steps";
+import { type AssetUploadProgress, uploadAndProcessAsset } from "@/module/assets/assets.upload";
 import {
   Attachment,
   AttachmentPreview,
@@ -224,6 +227,14 @@ function mapUiMessagesToWorkspaceMessages(messages: UIMessage[]): ChatWorkspaceM
         provider: metadata.provider,
         status: metadata.status,
       },
+      attachments: message.parts
+        .filter((part) => part.type === "file")
+        .map((part, index) => ({
+          id: `${message.id}-asset-${index}`,
+          name: part.filename || "Document",
+          mimeType: part.mediaType,
+          url: part.url,
+        })),
       reasoning: reasoning
         ? {
             content: reasoning,
@@ -659,6 +670,7 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
   const attachments = useProviderAttachments();
   const viewerQuery = apiClient.viewer.session.useQuery(undefined, { refetchOnWindowFocus: false });
   const modelsQuery = apiClient.chat.models.useQuery(undefined, { refetchOnWindowFocus: false });
+  const createAsset = apiClient.assets.create.useMutation();
   const [model, setModel] = useState(thread?.model ?? "");
   const [reasoningEnabled, setReasoningEnabled] = useState(false);
   const [reasoningLevel, setReasoningLevel] = useState<ChatReasoningLevel>("low");
@@ -666,6 +678,11 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
   const [threadTitle, setThreadTitle] = useState(thread?.title ?? "Untitled chat");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [messageQueue, setMessageQueue] = useState<PromptInputMessage[]>([]);
+  const [assetUploads, setAssetUploads] = useState<
+    Array<{ id: string; name: string; sizeBytes: number; progress: AssetUploadProgress }>
+  >([]);
+  const [isUploadingAssets, setIsUploadingAssets] = useState(false);
+  const successfulAssetsBySource = useRef(new Map<string, { assetId: string; file: FileUIPart; sizeBytes: number }>());
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
@@ -710,6 +727,7 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
       setMessageQueue([]);
     },
     onFinish: ({ message }) => {
+      setAssetUploads([]);
       invalidateThreadLists();
       void utils.viewer.session.invalidate();
 
@@ -828,61 +846,6 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
     [renameThread, thread?.id, threadTitle],
   );
 
-  const handleSend = useCallback(
-    async (message: PromptInputMessage) => {
-      if (!message.text.trim() && message.files.length === 0) {
-        return;
-      }
-
-      if (isArchived) {
-        toast.error("This thread is archived. Restore it before sending a new message.");
-        return;
-      }
-
-      if (!model) {
-        toast.error("Select an available model before sending a message.");
-        return;
-      }
-
-      // If AI is currently processing, queue the message instead
-      if (status === "submitted" || status === "streaming") {
-        setMessageQueue((prev) => [...prev, message]);
-        toast.success(`Message queued. ${messageQueue.length + 1} in queue.`);
-        controller.textInput.setInput("");
-        attachments.clear();
-        return;
-      }
-
-      await sendMessage(
-        message.text.trim() ? { files: message.files, text: message.text.trim() } : { files: message.files },
-        {
-          body: {
-            model,
-            reasoningEnabled,
-            reasoningLevel,
-            threadId: thread?.id,
-            webSearch: useWebSearch,
-          },
-        },
-      );
-
-      controller.textInput.setInput("");
-    },
-    [
-      isArchived,
-      status,
-      messageQueue.length,
-      model,
-      reasoningEnabled,
-      reasoningLevel,
-      useWebSearch,
-      sendMessage,
-      thread?.id,
-      controller.textInput,
-      attachments,
-    ],
-  );
-
   const handleSuggestionClick = useCallback(
     async (suggestion: string) => {
       if (isArchived) {
@@ -915,27 +878,6 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
       });
     },
     [isArchived, status, messageQueue.length, model, reasoningEnabled, reasoningLevel, sendMessage, thread?.id],
-  );
-
-  // Helper function to send queued messages
-  const sendNextMessage = useCallback(
-    async (message: PromptInputMessage) => {
-      if (!model) return;
-
-      await sendMessage(
-        message.text.trim() ? { files: message.files, text: message.text.trim() } : { files: message.files },
-        {
-          body: {
-            model,
-            reasoningEnabled,
-            reasoningLevel,
-            threadId: thread?.id,
-            webSearch: useWebSearch,
-          },
-        },
-      );
-    },
-    [model, reasoningEnabled, reasoningLevel, useWebSearch, sendMessage, thread?.id],
   );
 
   const handleRename = useCallback(async () => {
@@ -1006,13 +948,187 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
     [controller.textInput],
   );
 
+  const uploadAndSend = useCallback(
+    async (message: PromptInputMessage) => {
+      if (!message.files.length) {
+        const outgoing = message.text.trim() ? { text: message.text.trim() } : { text: "" };
+        controller.textInput.setInput("");
+        attachments.clear();
+        await sendMessage(outgoing, {
+          body: {
+            model,
+            reasoningEnabled,
+            reasoningLevel,
+            threadId: thread?.id,
+            webSearch: useWebSearch,
+            assetIds: [],
+          },
+        });
+        return;
+      }
+
+      if (message.files.length > 5) {
+        toast.error("Upload up to 5 files in one chat message.");
+        return;
+      }
+
+      setIsUploadingAssets(true);
+      const rows = message.files.map((file, index) => ({
+        id: `${Date.now()}-${index}-${crypto.randomUUID()}`,
+        name: file.filename || `Document ${index + 1}`,
+        sizeBytes: 0,
+        progress: { stage: "uploading" as const, progress: 0, message: "Starting secure upload" },
+      }));
+      setAssetUploads(rows);
+      const uploadedFiles: Array<{ assetId: string; file: FileUIPart; sizeBytes: number }> = [];
+
+      try {
+        for (const [index, source] of message.files.entries()) {
+          const row = rows[index]!;
+          const sourceKey = `${source.url}\n${source.filename ?? ""}\n${source.mediaType ?? ""}`;
+          const existingUpload = successfulAssetsBySource.current.get(sourceKey);
+          if (existingUpload) {
+            uploadedFiles.push(existingUpload);
+            setAssetUploads((current) =>
+              current.map((item) =>
+                item.id === row.id
+                  ? {
+                      ...item,
+                      sizeBytes: existingUpload.sizeBytes,
+                      progress: { stage: "ready", progress: 100, message: "Ready to use in chat" },
+                    }
+                  : item,
+              ),
+            );
+            continue;
+          }
+          const blob = await fetch(source.url).then((response) => response.blob());
+          const file = new File([blob], source.filename || row.name, { type: source.mediaType || blob.type });
+          setAssetUploads((current) =>
+            current.map((item) => (item.id === row.id ? { ...item, sizeBytes: file.size } : item)),
+          );
+          const result = await uploadAndProcessAsset({
+            file,
+            userId: viewer?.user?.id ?? "",
+            maxSizeBytes: 10 * 1024 * 1024,
+            createAsset: (input) => createAsset.mutateAsync(input),
+            onProgress: (progress) =>
+              setAssetUploads((current) => current.map((item) => (item.id === row.id ? { ...item, progress } : item))),
+          });
+          const upload = {
+            assetId: result.assetId,
+            sizeBytes: file.size,
+            file: {
+              type: "file" as const,
+              url: `/api/assets/${result.assetId}/download`,
+              filename: file.name,
+              mediaType: file.type,
+            },
+          };
+          uploadedFiles.push(upload);
+          successfulAssetsBySource.current.set(sourceKey, upload);
+        }
+
+        const text =
+          message.text.trim() ||
+          "Please briefly summarize each uploaded document and call out its main topics and useful details.";
+        controller.textInput.setInput("");
+        attachments.clear();
+        setIsUploadingAssets(false);
+        await sendMessage(
+          { text, files: uploadedFiles.map((item) => item.file) },
+          {
+            body: {
+              model,
+              reasoningEnabled,
+              reasoningLevel,
+              threadId: thread?.id,
+              webSearch: useWebSearch,
+              assetIds: uploadedFiles.map((item) => item.assetId),
+            },
+          },
+        );
+        successfulAssetsBySource.current.clear();
+        void utils.assets.list.invalidate();
+      } catch (error) {
+        const messageText = error instanceof Error ? error.message : "Upload or document analysis failed.";
+        setAssetUploads((current) =>
+          current.map((item) => {
+            if (item.progress.stage === "ready") return item;
+            return {
+              ...item,
+              progress: { ...item.progress, stage: "failed", message: "Upload or analysis failed", error: messageText },
+            };
+          }),
+        );
+        toast.error(messageText);
+      } finally {
+        setIsUploadingAssets(false);
+      }
+    },
+    [
+      attachments,
+      controller.textInput,
+      createAsset,
+      model,
+      reasoningEnabled,
+      reasoningLevel,
+      sendMessage,
+      thread?.id,
+      useWebSearch,
+      utils.assets.list,
+    ],
+  );
+
+  const handleSend = useCallback(
+    async (message: PromptInputMessage) => {
+      if (!message.text.trim() && message.files.length === 0) return;
+      if (isArchived) {
+        toast.error("This thread is archived. Restore it before sending a new message.");
+        return;
+      }
+      if (!model) {
+        toast.error("Select an available model before sending a message.");
+        return;
+      }
+      if (isUploadingAssets) return;
+      if (status === "submitted" || status === "streaming") {
+        setMessageQueue((prev) => [...prev, message]);
+        toast.success(`Message queued. ${messageQueue.length + 1} in queue.`);
+        controller.textInput.setInput("");
+        attachments.clear();
+        return;
+      }
+      await uploadAndSend(message);
+    },
+    [
+      attachments,
+      controller.textInput,
+      isArchived,
+      isUploadingAssets,
+      messageQueue.length,
+      model,
+      status,
+      uploadAndSend,
+    ],
+  );
+
+  const sendNextMessage = useCallback(
+    async (message: PromptInputMessage) => {
+      if (!model) return;
+      await uploadAndSend(message);
+    },
+    [model, uploadAndSend],
+  );
+
   const isSubmitting = status === "submitted" || status === "streaming";
   const isBusy = renameThread.isPending || archiveThread.isPending || restoreThread.isPending;
   const isSubmitDisabled =
     (!controller.textInput.value.trim() && attachments.files.length === 0) ||
     !model ||
     hasNoRuntimeModels ||
-    isArchived;
+    isArchived ||
+    isUploadingAssets;
   const activePlan = viewer?.billing?.currentPlan?.name ?? "Free";
   const balanceCredits = viewer?.wallet?.balanceCredits ?? 0;
   const isLowBalance = balanceCredits <= 0 || balanceCredits < 1000;
@@ -1093,6 +1209,25 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
                                   </Reasoning>
                                 ) : null}
                                 <MessageContent>
+                                  {message.from === "user" && message.attachments?.length ? (
+                                    <div className="mb-3 grid gap-2">
+                                      {message.attachments.map((attachment) => (
+                                        <a
+                                          className="flex items-center gap-3 rounded-xl border bg-card p-3 text-sm hover:bg-muted/50"
+                                          href={attachment.url}
+                                          key={attachment.id}
+                                          rel="noreferrer"
+                                          target="_blank"
+                                        >
+                                          <AssetFileIcon name={attachment.name} />
+                                          <span className="min-w-0">
+                                            <span className="block truncate font-medium">{attachment.name}</span>
+                                            <span className="text-xs text-muted-foreground">{attachment.mimeType}</span>
+                                          </span>
+                                        </a>
+                                      ))}
+                                    </div>
+                                  ) : null}
                                   <MessageResponse>{version.content}</MessageResponse>
                                 </MessageContent>
                                 {message.from === "assistant" ? <MessageUsage message={message} /> : null}
@@ -1111,6 +1246,22 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
                     );
                   })
                 )}
+                {assetUploads.length ? (
+                  <div
+                    className="mx-auto mb-4 grid w-full max-w-3xl gap-2 px-4"
+                    role="region"
+                    aria-label="Document upload progress"
+                  >
+                    {assetUploads.map((item) => (
+                      <AssetUploadSteps
+                        key={item.id}
+                        name={item.name}
+                        sizeBytes={item.sizeBytes}
+                        progress={item.progress}
+                      />
+                    ))}
+                  </div>
+                ) : null}
               </ConversationContent>
               <ConversationScrollButton />
             </Conversation>

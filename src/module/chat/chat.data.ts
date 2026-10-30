@@ -22,6 +22,7 @@ export type ChatWorkspaceMessage = {
     provider?: string;
     status?: string;
   };
+  attachments?: Array<{ id: string; name: string; mimeType: string; url: string }>;
 };
 
 export const CHAT_RECENT_THREADS_LIMIT = 9;

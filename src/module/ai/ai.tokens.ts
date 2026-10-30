@@ -17,6 +17,10 @@ export function estimateTokenCount(content: string) {
   return Math.max(1, Math.ceil(normalized.length / 4));
 }
 
+export function addAdditionalPromptContextTokens(estimatedTokens: number, additionalContext: string) {
+  return estimatedTokens + estimateTokenCount(additionalContext);
+}
+
 export function estimateTokensFromMessages(messages: UIMessage[]) {
   return messages.reduce((total, message) => total + estimateTokenCount(extractPlainTextFromMessage(message)), 0);
 }

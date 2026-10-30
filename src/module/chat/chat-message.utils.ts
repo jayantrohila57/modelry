@@ -21,6 +21,7 @@ export type PersistedChatMessage = {
   finishedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  attachments?: Array<{ id: string; name: string; mimeType: string }>;
 };
 
 export type PersistedMessageMetadata = {
@@ -73,6 +74,12 @@ export function mapPersistedMessagesToUiMessages(messages: PersistedChatMessage[
             },
           ]
         : []),
+      ...(message.attachments ?? []).map((attachment) => ({
+        type: "file" as const,
+        mediaType: attachment.mimeType,
+        filename: attachment.name,
+        url: `/api/assets/${attachment.id}/download`,
+      })),
     ],
     role: message.role === "tool" ? "assistant" : message.role,
   }));

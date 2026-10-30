@@ -1,6 +1,6 @@
 "use client";
 
-import { Edit, MessageCircle } from "lucide-react";
+import { Edit, FolderOpen, MessageCircle } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { startTransition } from "react";
@@ -105,6 +105,14 @@ export function NavMain() {
               <Link href={PATH.CHAT.ROOT}>
                 <MessageCircle className="size-4" />
                 <span>All Chats</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild isActive={pathname.startsWith(PATH.ASSETS.ROOT)}>
+              <Link href={PATH.ASSETS.ROOT}>
+                <FolderOpen className="size-4" />
+                <span>Assets</span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>

@@ -8,6 +8,9 @@ export const PATH = {
     ARCHIVE: "/chat/archive" as Route,
     THREAD: (threadId: string) => `/chat/${threadId}` as Route,
   },
+  ASSETS: {
+    ROOT: "/assets" as Route,
+  },
   PRICING: {
     ROOT: "/pricing" as Route,
     SUCCESS: "/pricing/success" as Route,
