@@ -39,14 +39,14 @@ export const ConversationContent = ({ className, ...props }: ConversationContent
   const viewportRef = useConversationViewport();
 
   return (
-    <MessageScroller.Viewport
-      aria-label="Chat messages"
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain data-[pending-scroll]:invisible"
+        <MessageScroller.Viewport
+          aria-label="Chat messages"
+          className="scroll-fade-y min-h-0 flex-1 overflow-y-auto overscroll-contain"
       preserveScrollOnPrepend
       ref={viewportRef ?? undefined}
     >
       <MessageScroller.Content
-        className={cn("mx-auto flex w-full max-w-3xl flex-col gap-8 p-4", className)}
+        className={cn("mx-auto flex min-h-full w-full max-w-3xl flex-col gap-5 p-4", className)}
         {...props}
       />
     </MessageScroller.Viewport>

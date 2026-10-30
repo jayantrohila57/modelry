@@ -2,12 +2,11 @@
 
 import type { UIMessage } from "ai";
 import { ArchiveRestore, ChevronLeft, ChevronRight, Edit3, RefreshCcw, Trash2 } from "lucide-react";
-import type { ComponentProps } from "react";
+import { useEffect, useState, type ComponentProps } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/components/ui/alert";
 import { Badge } from "@/shared/components/ui/badge";
 import { Button } from "@/shared/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/shared/components/ui/sheet";
-import { useIsMobile } from "@/shared/utils/hooks/use-mobile";
 import { cn } from "@/shared/utils/lib/utils";
 
 type AllowedModelLike = {
@@ -113,12 +112,20 @@ function RailBody({
 }
 
 export function ChatMetaRail({ open, onOpenChange, ...props }: ChatMetaRailProps) {
-  const isMobile = useIsMobile();
+  const [isCompact, setIsCompact] = useState(true);
 
-  if (isMobile) {
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 1279px)");
+    const update = () => setIsCompact(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  if (isCompact) {
     return (
       <Sheet onOpenChange={onOpenChange} open={open}>
-        <SheetContent className="w-full max-w-sm p-0 sm:max-w-sm" side="right">
+        <SheetContent className="w-[min(340px,calc(100vw-1rem))] max-w-sm p-0 sm:max-w-sm" side="right">
           <SheetHeader className="sr-only">
             <SheetTitle>Chat details</SheetTitle>
             <SheetDescription>Chat details, usage, and thread actions.</SheetDescription>

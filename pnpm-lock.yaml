@@ -89,6 +89,9 @@ importers:
       cmdk:
         specifier: 1.1.1
         version: 1.1.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      cn:
+        specifier: ^0.5.1
+        version: 0.5.1
       date-fns:
         specifier: 4.4.0
         version: 4.4.0
@@ -141,8 +144,8 @@ importers:
         specifier: 19.3.1
         version: 19.3.1
       react-day-picker:
-        specifier: 9.14.0
-        version: 9.14.0(react@19.3.1)
+        specifier: 10.0.2
+        version: 10.0.2(@types/react@19.3.0)(react@19.3.1)
       react-dom:
         specifier: 19.3.1
         version: 19.3.1(react@19.3.1)
@@ -2653,10 +2656,6 @@ packages:
       zod:
         optional: true
 
-  '@tabby_ai/hijri-converter@1.0.5':
-    resolution: {integrity: sha512-r5bClKrcIusDoo049dSL8CawnHR6mRdDwhlQuIgZRNty68q0x8k3Lf1BtPAMxRf/GgnHBnIO4ujd3+GQdLWzxQ==}
-    engines: {node: '>=16.0.0'}
-
   '@tailwindcss/node@4.3.3':
     resolution: {integrity: sha512-/T8IKEsf9VTU6tLjgC7+sv2mOPtQxzE2jMw7u4Tt40Tx+QSZxpzh95/H6cMKoja9XuW7iMdLJYBB0o9G1CaAgg==}
 
@@ -3361,6 +3360,11 @@ packages:
     engines: {node: '>=20'}
     hasBin: true
 
+  cn@0.5.1:
+    resolution: {integrity: sha512-SA06SpzSWXRNrt/EQWnRpck9jEVDfVJonw8ZewiNR6pOC4U0SQ81tWaQ9/PKNPh/lWvjuY4CMlxpc8tJViiX6Q==}
+    engines: {node: '>=22'}
+    hasBin: true
+
   code-block-writer@13.0.3:
     resolution: {integrity: sha512-Oofo0pq3IKnsFtuHqSF7TqBfr71aeyZDVJ0HpmqB7FBM2qEigL0iPONSCZSO9pE9dZTAxANe5XHG9Uy0YMv8cg==}
 
@@ -3603,9 +3607,6 @@ packages:
 
   dagre-d3-es@7.0.14:
     resolution: {integrity: sha512-P4rFMVq9ESWqmOgK+dlXvOtLwYg0i7u0HBGJER0LZDJT2VHIPAMZ/riPxqJceWMStH5+E61QxFra9kIS3AqdMg==}
-
-  date-fns-jalali@4.1.0-0:
-    resolution: {integrity: sha512-hTIP/z+t+qKwBDcmmsnmjWTduxCg+5KfdqWQvb2X/8C9+knYY6epN/pfxdDuyVlSVeFz0sM5eEfwIUQ70U4ckg==}
 
   date-fns@4.4.0:
     resolution: {integrity: sha512-+1UMbeh68lH1SegH83CGWwpb6OHHbpSgr3+s5Eww5M4CAgswBpoWS0AjTOfEJ33HiYKz1hdj/KTFprzXHmq/6w==}
@@ -5098,11 +5099,15 @@ packages:
       '@types/react-dom':
         optional: true
 
-  react-day-picker@9.14.0:
-    resolution: {integrity: sha512-tBaoDWjPwe0M5pGrum4H0SR6Lyk+BO9oHnp9JbKpGKW2mlraNPgP9BMfsg5pWpwrssARmeqk7YBl2oXutZTaHA==}
+  react-day-picker@10.0.2:
+    resolution: {integrity: sha512-QetiKtZWE9Uaw/pM/SYNv6WPYOTRnSJ2puL0GgwkmUFMIwiY0dtjH1W4B7DOVXVNQM0ZOClGpH/heOfBSzWeiA==}
     engines: {node: '>=18'}
     peerDependencies:
+      '@types/react': '>=16.8.0'
       react: '>=16.8.0'
+    peerDependenciesMeta:
+      '@types/react':
+        optional: true
 
   react-dom@19.3.1:
     resolution: {integrity: sha512-Y0bARz53lhEC1NMCASs0/j+faB/zqt3R8hpvg1e8+61ZVJ4UL0UdC4cBbXfZMcIuhrfgeILTLe+ZeBCavQPtKQ==}
@@ -7889,8 +7894,6 @@ snapshots:
       typescript: 7.0.2
       zod: 4.6.7
 
-  '@tabby_ai/hijri-converter@1.0.5': {}
-
   '@tailwindcss/node@4.3.3':
     dependencies:
       '@jridgewell/remapping': 2.3.5
@@ -8495,6 +8498,8 @@ snapshots:
 
   cn@0.2.6: {}
 
+  cn@0.5.1: {}
+
   code-block-writer@13.0.3: {}
 
   color-convert@3.1.3:
@@ -8766,8 +8771,6 @@ snapshots:
     dependencies:
       d3: 7.9.0
       lodash-es: 4.18.1
-
-  date-fns-jalali@4.1.0-0: {}
 
   date-fns@4.4.0: {}
 
@@ -10452,13 +10455,13 @@ snapshots:
       '@types/react': 19.3.0
       '@types/react-dom': 19.3.0(@types/react@19.3.0)
 
-  react-day-picker@9.14.0(react@19.3.1):
+  react-day-picker@10.0.2(@types/react@19.3.0)(react@19.3.1):
     dependencies:
       '@date-fns/tz': 1.5.0
-      '@tabby_ai/hijri-converter': 1.0.5
       date-fns: 4.4.0
-      date-fns-jalali: 4.1.0-0
       react: 19.3.1
+    optionalDependencies:
+      '@types/react': 19.3.0
 
   react-dom@19.3.1(react@19.3.1):
     dependencies:

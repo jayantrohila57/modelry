@@ -9,13 +9,17 @@ import { TooltipProvider } from "@/shared/components/ui/tooltip";
 import { siteMetadata } from "@/shared/config/site";
 import { cn } from "@/shared/utils/lib/utils";
 import { className, viewport } from "@/shared/utils/methods/font";
+import { Geist } from "next/font/google";
+
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
+
 
 export { viewport };
 export const metadata = siteMetadata;
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning className={cn(className)}>
+    <html lang="en" suppressHydrationWarning className={cn(className, "font-sans", geist.variable)}>
       <body suppressHydrationWarning className={className}>
         <TRPCReactProvider>
           <ThemeProvider>

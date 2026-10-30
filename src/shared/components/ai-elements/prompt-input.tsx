@@ -16,7 +16,17 @@ import type {
   ReactNode,
   RefObject,
 } from "react";
-import { Children, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Children,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Command,
   CommandEmpty,
@@ -441,6 +451,8 @@ export type PromptInputProps = Omit<HTMLAttributes<HTMLFormElement>, "onSubmit" 
   maxFiles?: number;
   // bytes
   maxFileSize?: number;
+  /** Let the submit handler own clearing for drafts that must survive async work. Defaults to true. */
+  clearOnSubmit?: boolean;
   onError?: (err: { code: "max_files" | "max_file_size" | "accept"; message: string }) => void;
   onSubmit: (message: PromptInputMessage, event: FormEvent<HTMLFormElement>) => void | Promise<void>;
 };
@@ -453,6 +465,7 @@ export const PromptInput = ({
   syncHiddenInput,
   maxFiles,
   maxFileSize,
+  clearOnSubmit = true,
   onError,
   onSubmit,
   children,
@@ -475,10 +488,17 @@ export const PromptInput = ({
 
   // Keep a ref to files for cleanup on unmount (avoids stale closure)
   const filesRef = useRef(files);
+  const textInputRef = useRef(usingProvider ? controller.textInput.value : "");
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     filesRef.current = files;
   }, [files]);
+
+  useLayoutEffect(() => {
+    if (usingProvider && controller) {
+      textInputRef.current = controller.textInput.value;
+    }
+  }, [controller, usingProvider, controller?.textInput.value]);
 
   const openFileDialogLocal = useCallback(() => {
     inputRef.current?.click();
@@ -628,11 +648,6 @@ export const PromptInput = ({
   const remove = usingProvider ? controller.attachments.remove : removeLocal;
   const openFileDialog = usingProvider ? controller.attachments.openFileDialog : openFileDialogLocal;
 
-  const clear = useCallback(() => {
-    clearAttachments();
-    clearReferencedSources();
-  }, [clearAttachments, clearReferencedSources]);
-
   // Let provider know about our hidden file input so external menus can call openFileDialog()
   useEffect(() => {
     if (!usingProvider) {
@@ -769,6 +784,24 @@ export const PromptInput = ({
             const formData = new FormData(form);
             return (formData.get("message") as string) || "";
           })();
+      const submittedAttachmentIds = new Set(files.map((file) => file.id));
+
+      const clearSubmittedInput = () => {
+        clearReferencedSources();
+        if (!usingProvider) {
+          clearAttachments();
+          return;
+        }
+
+        if (textInputRef.current === text) {
+          controller.textInput.clear();
+        }
+        for (const file of filesRef.current) {
+          if (submittedAttachmentIds.has(file.id)) {
+            controller.attachments.remove(file.id);
+          }
+        }
+      };
 
       // Reset form immediately after capturing text to avoid race condition
       // where user input during async blob conversion would be lost
@@ -798,25 +831,23 @@ export const PromptInput = ({
         if (result instanceof Promise) {
           try {
             await result;
-            clear();
-            if (usingProvider) {
-              controller.textInput.clear();
+            if (clearOnSubmit) {
+              clearSubmittedInput();
             }
           } catch {
             // Don't clear on error - user may want to retry
           }
         } else {
           // Sync function completed without throwing, clear inputs
-          clear();
-          if (usingProvider) {
-            controller.textInput.clear();
+          if (clearOnSubmit) {
+            clearSubmittedInput();
           }
         }
       } catch {
         // Don't clear on error - user may want to retry
       }
     },
-    [usingProvider, controller, files, onSubmit, clear],
+    [usingProvider, controller, files, onSubmit, clearOnSubmit, clearAttachments, clearReferencedSources],
   );
 
   // Render with or without local provider

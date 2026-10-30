@@ -29,8 +29,8 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" variant="inset">
       <SidebarHeader className="bg-background rounded-t-xl shadow-sm ">
         <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton size="lg" className="group">
+          <SidebarMenuItem className="flex items-center gap-2">
+            <div className="group flex min-w-0 flex-1 items-center">
               <div
                 className="hidden aspect-square size-8 items-center justify-center rounded-lg text-white group-data-[collapsible=icon]:flex"
                 style={{ backgroundColor: siteConfig.brand.navy }}
@@ -41,8 +41,8 @@ export function AppSidebar() {
               <div className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
                 <BrandLogo showTagline size="sm" />
               </div>
-              <SidebarTrigger asChild />
-            </SidebarMenuButton>
+            </div>
+            <SidebarTrigger aria-label="Toggle sidebar" />
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>

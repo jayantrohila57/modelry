@@ -307,7 +307,7 @@ const MultipleSelector = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedSearchTerm, groupBy, open, triggerSearchOnFocus]);
 
-  const CreatableItem = () => {
+  const renderCreatableItem = () => {
     if (!creatable) return undefined;
     if (
       isOptionsExist(options, [{ value: inputValue, label: inputValue }]) ||
@@ -524,7 +524,7 @@ const MultipleSelector = ({
               ) : (
                 <>
                   {EmptyItem()}
-                  {CreatableItem()}
+                  {renderCreatableItem()}
                   {!selectFirstItem && <CommandItem value="-" className="hidden" />}
                   {Object.entries(selectables).map(([key, dropdowns]) => (
                     <CommandGroup key={key} heading={key} className="h-full overflow-auto">

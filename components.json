@@ -6,7 +6,7 @@
   "tailwind": {
     "config": "",
     "css": "src/shared/styles/globals.css",
-    "baseColor": "neutral",
+    "baseColor": "zinc",
     "cssVariables": true,
     "prefix": ""
   },
@@ -21,7 +21,5 @@
     "lib": "@/shared/utils/lib",
     "hooks": "@/shared/utils/hooks"
   },
-  "registries": {
-    "@ai-elements": "https://ai-sdk.dev/elements/api/registry/{name}.json"
-  }
+  "registries": {}
 }

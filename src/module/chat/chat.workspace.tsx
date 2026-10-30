@@ -2,13 +2,11 @@
 
 import { useChat } from "@ai-sdk/react";
 import { MessageScroller } from "@shadcn/react/message-scroller";
-import { DefaultChatTransport, type FileUIPart, type UIMessage } from "ai";
+import { DefaultChatTransport, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from "ai";
 import {
   ArchiveRestore,
-  BrainIcon,
   CheckIcon,
   CopyIcon,
-  GlobeIcon,
   Info,
   InfoIcon,
   Layers,
@@ -17,10 +15,9 @@ import {
   PencilIcon,
   RotateCwIcon,
   Sparkles,
-  XIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   apiClient,
@@ -37,109 +34,19 @@ import { type AssetUploadProgress, uploadAndProcessAsset } from "@/module/assets
 import { announceChatChange, createChatWorkspaceKey, getNewChatDestination } from "@/module/chat/chat.navigation";
 import { createRetryChatRequest, resolveChatRequestThreadId } from "@/module/chat/chat.request.utils";
 import {
-  Attachment,
-  AttachmentPreview,
-  AttachmentRemove,
-  Attachments,
-} from "@/shared/components/ai-elements/attachments";
-import {
-  ChainOfThought,
-  ChainOfThoughtContent,
-  ChainOfThoughtHeader,
-  ChainOfThoughtStep,
-} from "@/shared/components/ai-elements/chain-of-thought";
-import {
-  Context,
-  ContextContent,
-  ContextContentBody,
-  ContextContentFooter,
-  ContextContentHeader,
-  ContextInputUsage,
-  ContextOutputUsage,
-  ContextReasoningUsage,
-  ContextTrigger,
-} from "@/shared/components/ai-elements/context";
-import {
   Conversation,
   ConversationContent,
   ConversationScrollButton,
   useConversationViewport,
 } from "@/shared/components/ai-elements/conversation";
-import {
-  InlineCitation,
-  InlineCitationCard,
-  InlineCitationCardBody,
-  InlineCitationCardTrigger,
-  InlineCitationSource,
-} from "@/shared/components/ai-elements/inline-citation";
-import {
-  Message,
-  MessageAction,
-  MessageActions,
-  MessageContent,
-  MessageResponse,
-} from "@/shared/components/ai-elements/message";
-import {
-  ModelSelector,
-  ModelSelectorContent,
-  ModelSelectorEmpty,
-  ModelSelectorGroup,
-  ModelSelectorInput,
-  ModelSelectorItem,
-  ModelSelectorList,
-  ModelSelectorLogo,
-  ModelSelectorLogoGroup,
-  ModelSelectorName,
-  ModelSelectorTrigger,
-} from "@/shared/components/ai-elements/model-selector";
+import { MessageAction, MessageActions, MessageResponse } from "@/shared/components/ai-elements/message";
 import type { PromptInputMessage } from "@/shared/components/ai-elements/prompt-input";
 import {
-  PromptInput,
-  PromptInputActionAddAttachments,
-  PromptInputActionMenu,
-  PromptInputActionMenuContent,
-  PromptInputActionMenuTrigger,
-  PromptInputBody,
-  PromptInputButton,
-  PromptInputFooter,
-  PromptInputHeader,
   PromptInputProvider,
-  PromptInputSelect,
-  PromptInputSelectContent,
-  PromptInputSelectItem,
-  PromptInputSelectTrigger,
-  PromptInputSelectValue,
-  PromptInputSubmit,
-  PromptInputTextarea,
-  PromptInputTools,
-  usePromptInputAttachments,
   usePromptInputController,
   useProviderAttachments,
 } from "@/shared/components/ai-elements/prompt-input";
-import {
-  Queue,
-  QueueItem,
-  QueueItemContent,
-  QueueItemIndicator,
-  QueueList,
-  QueueSection,
-  QueueSectionContent,
-  QueueSectionLabel,
-  QueueSectionTrigger,
-} from "@/shared/components/ai-elements/queue";
-import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/shared/components/ai-elements/reasoning";
-import { Shimmer } from "@/shared/components/ai-elements/shimmer";
-import { Source, Sources, SourcesContent, SourcesTrigger } from "@/shared/components/ai-elements/sources";
-import { SpeechInput } from "@/shared/components/ai-elements/speech-input";
 import { Suggestion, Suggestions } from "@/shared/components/ai-elements/suggestion";
-import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-  type ToolPart,
-} from "@/shared/components/ai-elements/tool";
 import Shell from "@/shared/components/layout/shell";
 import { useSettingsDialog } from "@/shared/components/provider/global-modal.provider";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/components/ui/alert";
@@ -153,7 +60,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/shared/components/ui/alert-dialog";
+import {
+  Attachment,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentMedia,
+  AttachmentTitle,
+} from "@/shared/components/ui/attachment";
 import { Badge } from "@/shared/components/ui/badge";
+import { Bubble, BubbleContent } from "@/shared/components/ui/bubble";
 import { Button } from "@/shared/components/ui/button";
 import {
   Dialog,
@@ -173,6 +88,11 @@ import {
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/shared/components/ui/hover-card";
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
+import {
+  Message as MessageFrame,
+  MessageContent as MessageFrameContent,
+  MessageFooter as MessageFrameFooter,
+} from "@/shared/components/ui/message";
 import { Spinner } from "@/shared/components/ui/spinner";
 import { Textarea } from "@/shared/components/ui/textarea";
 import { Toggle } from "@/shared/components/ui/toggle";
@@ -180,16 +100,8 @@ import { PATH } from "@/shared/config/routes";
 import { useIsMobile } from "@/shared/utils/hooks/use-mobile";
 import { cn } from "@/shared/utils/lib/utils";
 import { CHAT_RECENT_THREADS_LIMIT, type ChatWorkspaceMessage, chatSuggestions } from "./chat.data";
-import { ChatMetaRail, ChatMetaRailToggle } from "./chat.meta-rail";
-import {
-  CHAT_REASONING_EFFORTS,
-  CHAT_TEMPERATURE_PRESETS,
-  type ChatReasoningEffort,
-  type ChatTemperaturePreset,
-  deriveAutoThreadTitleFromText,
-  formatReasoningEffortLabel,
-  formatTemperaturePresetLabel,
-} from "./chat.runtime";
+import { ChatMetaRail } from "./chat.meta-rail";
+import { type ChatReasoningEffort, type ChatTemperaturePreset, deriveAutoThreadTitleFromText } from "./chat.runtime";
 import {
   formatMessageTimestamp,
   getMessageMetadata,
@@ -199,6 +111,8 @@ import {
   mapPersistedMessagesToUiMessages,
   type PersistedChatMessage,
 } from "./chat-message.utils";
+import { ChatComposer } from "./components/chat-composer";
+import { ChatReasoningTrace, ChatSourcesTrace, ChatToolTrace } from "./components/chat-traces";
 import {
   clearThreadDraftSnapshot,
   createThreadDraftKey,
@@ -227,6 +141,7 @@ const CHAT_FILE_ACCEPT = ASSET_FILE_TYPES.map((extension) => `.${extension}`).jo
 
 type AllowedModel = UnwrapApiData<RouterOutputs["chat"]["models"]>[number];
 type ViewerSessionPayload = UnwrapApiData<RouterOutputs["viewer"]["session"]>;
+type ToolPart = ToolUIPart | DynamicToolUIPart;
 
 type ChatWorkspaceThread = {
   id: string;
@@ -326,44 +241,12 @@ function getAssetIdsFromMessage(message: UIMessage | undefined) {
   });
 }
 
-function AttachmentItem({
-  attachment,
-  onRemove,
-}: {
-  attachment: FileUIPart & { id: string };
-  onRemove: (id: string) => void;
-}) {
-  return (
-    <Attachment data={attachment} onRemove={() => onRemove(attachment.id)}>
-      <AttachmentPreview />
-      <AttachmentRemove />
-    </Attachment>
-  );
-}
-
-function PromptInputAttachmentsDisplay() {
-  const attachments = usePromptInputAttachments();
-
-  if (attachments.files.length === 0) {
-    return null;
-  }
-
-  return (
-    <Attachments variant="inline">
-      {attachments.files.map((attachment: FileUIPart & { id: string }) => (
-        <AttachmentItem attachment={attachment} key={attachment.id} onRemove={attachments.remove} />
-      ))}
-    </Attachments>
-  );
-}
-
 function DraftSync({ draftKey, droppedAttachmentCount = 0 }: { draftKey: string; droppedAttachmentCount?: number }) {
   const controller = usePromptInputController();
   const attachments = useProviderAttachments();
-  const deferredText = useDeferredValue(controller.textInput.value);
 
   useEffect(() => {
-    if (!deferredText.trim() && attachments.files.length === 0 && droppedAttachmentCount === 0) {
+    if (!controller.textInput.value.trim() && attachments.files.length === 0 && droppedAttachmentCount === 0) {
       clearThreadDraftSnapshot(draftKey);
       return;
     }
@@ -380,7 +263,7 @@ function DraftSync({ draftKey, droppedAttachmentCount = 0 }: { draftKey: string;
       droppedAttachmentCount,
       text: controller.textInput.value,
     });
-  }, [attachments.files, controller.textInput.value, deferredText, droppedAttachmentCount, draftKey]);
+  }, [attachments.files, controller.textInput.value, droppedAttachmentCount, draftKey]);
 
   return null;
 }
@@ -419,84 +302,6 @@ function ConversationScrollRestoration({ threadId }: { threadId: string | null }
   }, [storageKey, viewportRef]);
 
   return null;
-}
-
-function ModelPicker({
-  model,
-  models,
-  onChange,
-}: {
-  model: string;
-  models: AllowedModel[];
-  onChange: (modelId: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const groupedModels = useMemo(
-    () => ({
-      Available: models.filter((item) => item.runtimeAvailable),
-      Unavailable: models.filter((item) => !item.runtimeAvailable),
-    }),
-    [models],
-  );
-  const selectedModelData = useMemo(() => models.find((item) => item.id === model) ?? models[0], [model, models]);
-
-  if (!selectedModelData) {
-    return (
-      <PromptInputButton disabled>
-        <span>No model</span>
-      </PromptInputButton>
-    );
-  }
-
-  return (
-    <ModelSelector onOpenChange={setOpen} open={open}>
-      <ModelSelectorTrigger asChild>
-        <PromptInputButton variant="secondary">
-          <ModelSelectorLogo provider={selectedModelData.provider} />
-          <ModelSelectorName>{selectedModelData.displayName}</ModelSelectorName>
-          {!selectedModelData.runtimeAvailable ? <Badge variant="outline">Offline</Badge> : null}
-        </PromptInputButton>
-      </ModelSelectorTrigger>
-      <ModelSelectorContent>
-        <ModelSelectorInput placeholder="Search models..." />
-        <ModelSelectorList>
-          <ModelSelectorEmpty>No models found.</ModelSelectorEmpty>
-          {Object.entries(groupedModels).map(([group, items]) =>
-            items.length > 0 ? (
-              <ModelSelectorGroup heading={group} key={group}>
-                {items.map((item) => (
-                  <ModelSelectorItem
-                    disabled={!item.runtimeAvailable}
-                    key={item.id}
-                    onSelect={() => {
-                      if (!item.runtimeAvailable) {
-                        return;
-                      }
-                      onChange(item.id);
-                      setOpen(false);
-                    }}
-                    value={item.id}
-                  >
-                    <ModelSelectorLogo provider={item.provider} />
-                    <div className="flex min-w-0 flex-1 flex-col">
-                      <ModelSelectorName>{item.displayName}</ModelSelectorName>
-                      <span className="text-muted-foreground truncate text-[11px]">{item.description}</span>
-                    </div>
-                    <ModelSelectorLogoGroup>
-                      <Badge variant="outline">{item.provider}</Badge>
-                      <Badge variant="outline">{item.planCode}</Badge>
-                      <Badge variant="secondary">x{(item.creditMultiplierBps / 10000).toFixed(2)}</Badge>
-                    </ModelSelectorLogoGroup>
-                    {model === item.id ? <CheckIcon className="ml-auto size-4" /> : <div className="ml-auto size-4" />}
-                  </ModelSelectorItem>
-                ))}
-              </ModelSelectorGroup>
-            ) : null,
-          )}
-        </ModelSelectorList>
-      </ModelSelectorContent>
-    </ModelSelector>
-  );
 }
 
 function MessageUsage({ message }: { message: ChatWorkspaceMessage }) {
@@ -578,7 +383,7 @@ function MessageUsage({ message }: { message: ChatWorkspaceMessage }) {
       {isStreaming ? (
         <Badge variant="outline" className="flex flex-row justify-start items-center gap-1 text-xs">
           <Spinner className="size-4 text-muted-foreground" />
-          <Shimmer duration={1.5}>Generating...</Shimmer>
+          <span className="shimmer text-muted-foreground motion-reduce:shimmer-none">Generating...</span>
         </Badge>
       ) : null}
     </div>
@@ -604,7 +409,6 @@ function EmptyConversationState({ mode }: { mode: "landing" | "thread" }) {
 }
 
 function ThreadToolbar({
-  detailsOpen,
   isArchived,
   isBusy,
   mode,
@@ -616,7 +420,6 @@ function ThreadToolbar({
   thread,
   threadTitle,
 }: {
-  detailsOpen: boolean;
   isArchived: boolean;
   isBusy: boolean;
   mode: "landing" | "thread";
@@ -692,18 +495,10 @@ function ThreadToolbar({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
-          {/* Sidebar rail trigger - commented out for future use (chat summary) */}
-          {/* <Button onClick={onToggleDetails} size="sm" type="button" variant="outline">
-            <ChatMetaRailToggle open={detailsOpen} />
-          </Button> */}
         </div>
       </div>
     </div>
   );
-}
-
-function getChainOfThoughtLabel(isStreaming: boolean) {
-  return <span>{isStreaming ? "Reasoning…" : "Reasoning"}</span>;
 }
 
 function getAutoTitleCandidate(messages: UIMessage[]) {
@@ -747,7 +542,6 @@ function ChatWorkspaceInner({
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editMessageText, setEditMessageText] = useState("");
   const [contextLimitExceeded, setContextLimitExceeded] = useState(false);
-  const [messageQueue, setMessageQueue] = useState<PromptInputMessage[]>([]);
   const failedExchangeRef = useRef<{
     body: {
       assetIds: string[];
@@ -889,19 +683,6 @@ function ChatWorkspaceInner({
           router.replace(PATH.CHAT.THREAD(nextThreadId));
         });
       }
-
-      // Auto-send next queued message if any
-      setMessageQueue((prev) => {
-        if (workspaceActiveRef.current && prev.length > 0) {
-          const [nextMessage, ...remaining] = prev;
-          // Send next message after a small delay to ensure state is updated
-          setTimeout(() => {
-            void sendNextMessage(nextMessage);
-          }, 100);
-          return remaining;
-        }
-        return prev;
-      });
     },
     transport: chatTransport,
   });
@@ -1194,10 +975,7 @@ function ChatWorkspaceInner({
 
       const message = { text: suggestion, files: [] as FileUIPart[] };
 
-      // If AI is currently processing, queue the message instead
       if (status === "submitted" || status === "streaming") {
-        setMessageQueue((prev) => [...prev, message]);
-        toast.success(`Message queued. ${messageQueue.length + 1} in queue.`);
         return;
       }
 
@@ -1219,7 +997,6 @@ function ChatWorkspaceInner({
     [
       isArchived,
       status,
-      messageQueue.length,
       model,
       reasoningEnabled,
       reasoningEffort,
@@ -1450,32 +1227,11 @@ function ChatWorkspaceInner({
       }
       if (isUploadingAssets) return;
       if (status === "submitted" || status === "streaming") {
-        setMessageQueue((prev) => [...prev, message]);
-        toast.success(`Message queued. ${messageQueue.length + 1} in queue.`);
-        controller.textInput.setInput("");
-        attachments.clear();
         return;
       }
       await uploadAndSend(message);
     },
-    [
-      attachments,
-      controller.textInput,
-      isArchived,
-      isUploadingAssets,
-      messageQueue.length,
-      model,
-      status,
-      uploadAndSend,
-    ],
-  );
-
-  const sendNextMessage = useCallback(
-    async (message: PromptInputMessage) => {
-      if (!model) return;
-      await uploadAndSend(message);
-    },
-    [model, uploadAndSend],
+    [attachments, controller.textInput, isArchived, isUploadingAssets, model, status, uploadAndSend],
   );
 
   const isSubmitting = status === "submitted" || status === "streaming";
@@ -1494,14 +1250,15 @@ function ChatWorkspaceInner({
     <Shell>
       <Shell.Section
         className={cn(
-          "grid size-full w-full  max-w-5xl grid-cols-1 px-0",
-          !isMobile && detailsOpen ? "xl:grid-cols-[minmax(0,1fr)_340px]" : "xl:grid-cols-[minmax(0,1fr)_0px]",
+          "grid size-full w-full max-w-none grid-cols-1 px-0",
+          !isMobile && detailsOpen
+            ? "xl:grid-cols-[minmax(0,1fr)_minmax(0,340px)]"
+            : "xl:grid-cols-[minmax(0,1fr)_0px]",
         )}
       >
         <div className="flex min-w-0 flex-col overflow-hidden">
           <DraftSync draftKey={draftKey} droppedAttachmentCount={droppedAttachmentCount} />
           <ThreadToolbar
-            detailsOpen={detailsOpen}
             isArchived={isArchived}
             isBusy={isBusy}
             mode={mode}
@@ -1552,7 +1309,11 @@ function ChatWorkspaceInner({
                   </div>
                 ) : null}
                 {renderedMessages.length === 0 ? (
-                  <MessageScroller.Item messageId="empty" scrollAnchor>
+                  <MessageScroller.Item
+                    className="flex min-h-[40vh] flex-1 items-center"
+                    messageId="empty"
+                    scrollAnchor
+                  >
                     <EmptyConversationState mode={mode} />
                   </MessageScroller.Item>
                 ) : (
@@ -1568,111 +1329,82 @@ function ChatWorkspaceInner({
                         messageId={message.key}
                         scrollAnchor={message.from === "user"}
                       >
-                        <Message from={message.from}>
-                          <div>
-                            {message.sources?.length ? (
-                              <Sources>
-                                <SourcesTrigger count={message.sources.length} />
-                                <SourcesContent>
-                                  {message.sources.map((source) => (
-                                    <Source href={source.href} key={source.href} title={source.title} />
-                                  ))}
-                                </SourcesContent>
-                              </Sources>
-                            ) : null}
+                        <MessageFrame align={message.from === "user" ? "end" : "start"}>
+                          <MessageFrameContent className="gap-2 text-sm">
                             {message.reasoning ? (
-                              <Reasoning isStreaming={isReasoningStreaming}>
-                                <ReasoningTrigger getThinkingMessage={getChainOfThoughtLabel} />
-                                <ReasoningContent>{message.reasoning.content}</ReasoningContent>
-                              </Reasoning>
+                              <ChatReasoningTrace
+                                content={message.reasoning.content}
+                                isStreaming={isReasoningStreaming}
+                              />
                             ) : null}
-                            <MessageContent>
-                              {message.from === "user" && message.attachments?.length ? (
-                                <div className="mb-3 grid gap-2">
-                                  {message.attachments.map((attachment) => (
-                                    <a
-                                      className="flex items-center gap-3 rounded-xl border bg-card p-3 text-sm hover:bg-muted/50"
-                                      href={attachment.url}
-                                      key={attachment.id}
-                                      rel="noreferrer"
-                                      target="_blank"
-                                    >
+                            {message.sources?.length ? <ChatSourcesTrace sources={message.sources} /> : null}
+                            {message.from === "user" && message.attachments?.length ? (
+                              <div className="flex max-w-[min(80%,32rem)] flex-wrap justify-end gap-2 self-end">
+                                {message.attachments.map((attachment) => (
+                                  <Attachment key={attachment.id} size="sm" state="done">
+                                    <AttachmentMedia>
                                       <AssetFileIcon name={attachment.name} />
-                                      <span className="min-w-0">
-                                        <span className="block truncate font-medium">{attachment.name}</span>
-                                        <span className="text-xs text-muted-foreground">{attachment.mimeType}</span>
-                                      </span>
-                                    </a>
-                                  ))}
-                                </div>
-                              ) : null}
-                              {editingMessageId === message.key ? (
-                                <div className="grid gap-2">
-                                  <Textarea
-                                    aria-label="Edit your message"
-                                    autoFocus
-                                    onChange={(event) => setEditMessageText(event.target.value)}
-                                    onKeyDown={(event) => {
-                                      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                                        event.preventDefault();
-                                        void saveEditedMessage();
-                                      }
-                                    }}
-                                    value={editMessageText}
-                                  />
-                                  <div className="flex gap-2">
-                                    <Button
-                                      disabled={!editMessageText.trim() || isSubmitting}
-                                      onClick={() => void saveEditedMessage()}
-                                      size="sm"
-                                      type="button"
-                                    >
-                                      <CheckIcon data-icon="inline-start" />
-                                      Save and resend
-                                    </Button>
-                                    <Button
-                                      onClick={() => setEditingMessageId(null)}
-                                      size="sm"
-                                      type="button"
-                                      variant="ghost"
-                                    >
-                                      Cancel
-                                    </Button>
-                                  </div>
-                                </div>
-                              ) : (
-                                <MessageResponse>{message.content}</MessageResponse>
-                              )}
-                            </MessageContent>
-                            {message.toolParts?.map((toolPart, index) => (
-                              <Tool
-                                defaultOpen={
-                                  toolPart.state === "input-streaming" || toolPart.state === "input-available"
-                                }
-                                key={`${message.key}-tool-${index}`}
-                              >
-                                <ToolHeader
-                                  state={toolPart.state as ToolPart["state"]}
-                                  title={`Tool: ${toolPart.toolName}`}
-                                  {...(toolPart.type === "dynamic-tool"
-                                    ? { type: "dynamic-tool" as const, toolName: toolPart.toolName }
-                                    : { type: toolPart.type as `tool-${string}` })}
+                                    </AttachmentMedia>
+                                    <AttachmentContent>
+                                      <a href={attachment.url} rel="noreferrer" target="_blank">
+                                        <AttachmentTitle>{attachment.name}</AttachmentTitle>
+                                        <span className="sr-only"> (opens in a new tab)</span>
+                                      </a>
+                                      <AttachmentDescription>{attachment.mimeType}</AttachmentDescription>
+                                    </AttachmentContent>
+                                  </Attachment>
+                                ))}
+                              </div>
+                            ) : null}
+                            {editingMessageId === message.key ? (
+                              <div className="grid gap-2">
+                                <Textarea
+                                  aria-label="Edit your message"
+                                  autoFocus
+                                  onChange={(event) => setEditMessageText(event.target.value)}
+                                  onKeyDown={(event) => {
+                                    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                                      event.preventDefault();
+                                      void saveEditedMessage();
+                                    }
+                                  }}
+                                  value={editMessageText}
                                 />
-                                <ToolContent>
-                                  <ToolInput input={toolPart.input as ToolPart["input"]} />
-                                  <ToolOutput
-                                    errorText={toolPart.errorText}
-                                    output={toolPart.output as ToolPart["output"]}
-                                  />
-                                </ToolContent>
-                              </Tool>
-                            ))}
+                                <div className="flex gap-2">
+                                  <Button
+                                    disabled={!editMessageText.trim() || isSubmitting}
+                                    onClick={() => void saveEditedMessage()}
+                                    size="sm"
+                                    type="button"
+                                  >
+                                    <CheckIcon data-icon="inline-start" />
+                                    Save and resend
+                                  </Button>
+                                  <Button
+                                    onClick={() => setEditingMessageId(null)}
+                                    size="sm"
+                                    type="button"
+                                    variant="ghost"
+                                  >
+                                    Cancel
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : message.from === "user" ? (
+                              <Bubble align="end" variant="muted">
+                                <BubbleContent className="whitespace-pre-wrap px-3 py-2 text-sm">
+                                  {message.content}
+                                </BubbleContent>
+                              </Bubble>
+                            ) : (
+                              <MessageResponse className="max-w-full overflow-x-auto">
+                                {message.content}
+                              </MessageResponse>
+                            )}
+                            {message.toolParts?.length ? <ChatToolTrace parts={message.toolParts} /> : null}
                             {message.from === "assistant" ? <MessageUsage message={message} /> : null}
-                            <div className="flex items-center justify-between gap-3 px-1">
-                              <time
-                                className="text-xs text-muted-foreground"
-                                dateTime={message.createdAt?.toISOString()}
-                              >
+                            <MessageFrameFooter className="justify-between gap-3 px-0 text-xs">
+                              <time className="text-muted-foreground" dateTime={message.createdAt?.toISOString()}>
                                 {message.createdAt ? formatMessageTimestamp(message.createdAt) : null}
                               </time>
                               <MessageActions>
@@ -1709,9 +1441,9 @@ function ChatWorkspaceInner({
                                   </MessageAction>
                                 ) : null}
                               </MessageActions>
-                            </div>
-                          </div>
-                        </Message>
+                            </MessageFrameFooter>
+                          </MessageFrameContent>
+                        </MessageFrame>
                       </MessageScroller.Item>
                     );
                   })
@@ -1763,45 +1495,7 @@ function ChatWorkspaceInner({
                   </Alert>
                 </div>
               ) : null}
-              {/* Message Queue Display */}
-              {messageQueue.length > 0 && !isArchived && (
-                <div className="px-4 pb-2">
-                  <Queue>
-                    <QueueSection>
-                      <QueueSectionTrigger>
-                        <QueueSectionLabel count={messageQueue.length} label="queued messages" />
-                      </QueueSectionTrigger>
-                      <QueueSectionContent>
-                        <QueueList>
-                          {messageQueue.map((queuedMessage, index) => (
-                            <QueueItem key={index}>
-                              <QueueItemIndicator />
-                              <QueueItemContent className="flex-1">
-                                <span className="truncate">
-                                  {queuedMessage.text ||
-                                    (queuedMessage.files.length > 0
-                                      ? `${queuedMessage.files.length} file(s)`
-                                      : "Message")}
-                                </span>
-                              </QueueItemContent>
-                              <Button
-                                className="h-6 w-6"
-                                onClick={() => setMessageQueue((prev) => prev.filter((_, i) => i !== index))}
-                                size="icon"
-                                type="button"
-                                variant="ghost"
-                              >
-                                <XIcon className="size-3" />
-                              </Button>
-                            </QueueItem>
-                          ))}
-                        </QueueList>
-                      </QueueSectionContent>
-                    </QueueSection>
-                  </Queue>
-                </div>
-              )}
-              <div className="w-full p-2">
+              <div className="mx-auto w-full max-w-3xl px-4 py-2 pb-[env(safe-area-inset-bottom)]">
                 {droppedAttachmentCount > attachments.files.length ? (
                   <Alert className="mb-2">
                     <AlertTitle>Reattach your files</AlertTitle>
@@ -1844,154 +1538,39 @@ function ChatWorkspaceInner({
                     </AlertDescription>
                   </Alert>
                 ) : null}
-                <PromptInput
+                <ChatComposer
                   accept={CHAT_FILE_ACCEPT}
-                  globalDrop
-                  maxFileSize={10 * 1024 * 1024}
-                  maxFiles={5}
-                  multiple
+                  allowedModels={allowedModels}
+                  draftTokenEstimate={draftTokenEstimate}
+                  isArchived={isArchived}
+                  isMobile={isMobile}
+                  isSubmitting={isSubmitting}
+                  isSubmitDisabled={isSubmitDisabled}
+                  isUploadingAssets={isUploadingAssets}
+                  measuredCompletionTokens={measuredCompletionTokens}
+                  measuredPromptTokens={measuredPromptTokens}
+                  measuredReasoningTokens={Number(latestAssistantMetadata?.reasoningTokens ?? 0)}
+                  mode={mode}
+                  model={model}
                   onError={(error) => toast.error(error.message)}
+                  onModelChange={setModel}
+                  onReasoningEffortChange={setReasoningEffort}
+                  onReasoningEnabledChange={setReasoningEnabled}
+                  onStop={stop}
                   onSubmit={handleSend}
-                >
-                  <PromptInputHeader>
-                    <PromptInputAttachmentsDisplay />
-                  </PromptInputHeader>
-                  <PromptInputBody>
-                    <div className="flex w-full items-start justify-between px-2">
-                      <PromptInputTextarea
-                        autoFocus={mode === "landing" && renderedMessages.length === 0}
-                        className="w-full min-w-0 max-w-xl"
-                        disabled={isArchived}
-                      />
-                      <span className="shrink-0 text-muted-foreground text-xs">
-                        ~{draftTokenEstimate.toLocaleString()} draft tokens
-                      </span>
-                    </div>
-                  </PromptInputBody>
-                  <PromptInputFooter className="flex-wrap">
-                    <PromptInputTools className="flex-wrap">
-                      <PromptInputActionMenu>
-                        <PromptInputActionMenuTrigger />
-                        <PromptInputActionMenuContent>
-                          <PromptInputActionAddAttachments label="Add documents" />
-                        </PromptInputActionMenuContent>
-                      </PromptInputActionMenu>
-                      <SpeechInput
-                        className="shrink-0"
-                        onTranscriptionChange={handleTranscriptionChange}
-                        size="icon-sm"
-                        variant="ghost"
-                      />
-                      <PromptInputButton
-                        aria-pressed={useWebSearch}
-                        disabled={!webSearchSupported || isArchived}
-                        onClick={() => setUseWebSearch((current) => !current)}
-                        title={
-                          webSearchSupported
-                            ? "Use Google Search for this response"
-                            : "Web search requires a Google model"
-                        }
-                        variant={useWebSearch ? "default" : "secondary"}
-                      >
-                        <GlobeIcon size={16} />
-                        <span>Search</span>
-                      </PromptInputButton>
-
-                      <PromptInputButton
-                        aria-label="Toggle chain of thought"
-                        aria-pressed={reasoningEnabled}
-                        disabled={!reasoningSupported || isArchived}
-                        onClick={() => setReasoningEnabled(!reasoningEnabled)}
-                        variant={reasoningEnabled ? "default" : "secondary"}
-                      >
-                        <BrainIcon className="size-3.5" />
-                        <span>{reasoningEnabled ? "Reasoning on" : "Reasoning off"}</span>
-                      </PromptInputButton>
-                      <PromptInputSelect
-                        disabled={isArchived}
-                        onValueChange={(value: string) => setTemperaturePreset(value as ChatTemperaturePreset)}
-                        value={temperaturePreset}
-                      >
-                        <PromptInputSelectTrigger>
-                          <PromptInputSelectValue placeholder="Temperature" />
-                        </PromptInputSelectTrigger>
-                        <PromptInputSelectContent>
-                          {CHAT_TEMPERATURE_PRESETS.map((level) => (
-                            <PromptInputSelectItem key={level} value={level}>
-                              {formatTemperaturePresetLabel(level)}
-                            </PromptInputSelectItem>
-                          ))}
-                        </PromptInputSelectContent>
-                      </PromptInputSelect>
-                      <PromptInputSelect
-                        disabled={!reasoningEnabled || !reasoningSupported || !reasoningEffortSupported || isArchived}
-                        onValueChange={(value: string) => setReasoningEffort(value as ChatReasoningEffort)}
-                        value={reasoningEffort}
-                      >
-                        <PromptInputSelectTrigger aria-label="Reasoning effort">
-                          <PromptInputSelectValue placeholder="Effort" />
-                        </PromptInputSelectTrigger>
-                        <PromptInputSelectContent>
-                          {CHAT_REASONING_EFFORTS.map((effort) => (
-                            <PromptInputSelectItem key={effort} value={effort}>
-                              {formatReasoningEffortLabel(effort)} effort
-                            </PromptInputSelectItem>
-                          ))}
-                        </PromptInputSelectContent>
-                      </PromptInputSelect>
-
-                      <ModelPicker model={model} models={allowedModels} onChange={setModel} />
-                    </PromptInputTools>
-                    <div className="flex items-center gap-2">
-                      {/* Context Token Usage Display */}
-                      <Context
-                        maxTokens={selectedModelData?.contextWindow ?? 128000}
-                        modelId={model}
-                        usage={{
-                          inputTokens: measuredPromptTokens,
-                          inputTokenDetails: {
-                            cacheReadTokens: undefined,
-                            cacheWriteTokens: undefined,
-                            noCacheTokens: undefined,
-                          },
-                          outputTokens: measuredCompletionTokens,
-                          outputTokenDetails: {
-                            reasoningTokens: Number(latestAssistantMetadata?.reasoningTokens ?? 0),
-                            textTokens: measuredCompletionTokens,
-                          },
-                          totalTokens: measuredPromptTokens + measuredCompletionTokens,
-                        }}
-                        usedTokens={measuredPromptTokens || draftTokenEstimate}
-                      >
-                        <ContextTrigger />
-
-                        <ContextContent>
-                          <ContextContentHeader />
-                          <ContextContentBody>
-                            <p className="mb-2 text-xs text-muted-foreground">
-                              {measuredPromptTokens > 0
-                                ? "Last response input usage from the provider."
-                                : "Rough estimate for this draft only; conversation history and document context are not included."}
-                            </p>
-                            <ContextInputUsage />
-                            <ContextOutputUsage />
-                            <ContextReasoningUsage />
-                          </ContextContentBody>
-                          <ContextContentFooter />
-                        </ContextContent>
-                      </Context>
-                      <PromptInputSubmit
-                        disabled={isSubmitDisabled}
-                        onStop={isSubmitting ? stop : undefined}
-                        status={status}
-                      />
-                    </div>
-                  </PromptInputFooter>
-                </PromptInput>
-                <p className={cn("text-muted-foreground mt-2 text-xs", mode === "landing" ? "block" : "hidden")}>
-                  Threads are created automatically after the first successful response and then moved to their own
-                  route.
-                </p>
+                  onTemperatureChange={setTemperaturePreset}
+                  onTranscriptionChange={handleTranscriptionChange}
+                  onWebSearchChange={setUseWebSearch}
+                  reasoningEffort={reasoningEffort}
+                  reasoningEffortSupported={reasoningEffortSupported}
+                  reasoningEnabled={reasoningEnabled}
+                  reasoningSupported={reasoningSupported}
+                  selectedModel={selectedModelData}
+                  status={status}
+                  temperaturePreset={temperaturePreset}
+                  useWebSearch={useWebSearch}
+                  webSearchSupported={webSearchSupported}
+                />
               </div>
             </div>
           </div>
