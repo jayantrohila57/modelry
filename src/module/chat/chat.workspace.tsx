@@ -660,7 +660,7 @@ function ChatWorkspaceInner({
       if (
         failedExchangeRef.current?.restoreInput !== false &&
         failedExchangeRef.current?.text &&
-        !controller.textInput.value.trim()
+        controller.textInput.value === ""
       ) {
         controller.textInput.setInput(failedExchangeRef.current.text);
       }
@@ -1076,6 +1076,27 @@ function ChatWorkspaceInner({
 
   const uploadAndSend = useCallback(
     async (message: PromptInputMessage) => {
+      const clearSubmittedDraft = () => {
+        if (controller.textInput.value === message.text) {
+          controller.textInput.setInput("");
+        }
+
+        const submittedFileCounts = new Map<string, number>();
+        for (const file of message.files) {
+          const key = `${file.filename ?? ""}\n${file.mediaType ?? ""}`;
+          submittedFileCounts.set(key, (submittedFileCounts.get(key) ?? 0) + 1);
+        }
+
+        for (const attachment of attachments.files) {
+          const key = `${attachment.filename ?? ""}\n${attachment.mediaType ?? ""}`;
+          const remaining = submittedFileCounts.get(key) ?? 0;
+          if (remaining > 0) {
+            attachments.remove(attachment.id);
+            submittedFileCounts.set(key, remaining - 1);
+          }
+        }
+      };
+
       if (!message.files.length) {
         const text = message.text.trim() ? message.text.trim() : "";
         const exchange = {
@@ -1092,9 +1113,9 @@ function ChatWorkspaceInner({
           messageId: crypto.randomUUID(),
           text,
         };
-        controller.textInput.setInput("");
-        attachments.clear();
-        await sendChatExchange(exchange);
+        const request = sendChatExchange(exchange);
+        clearSubmittedDraft();
+        await request;
         return;
       }
 
@@ -1177,10 +1198,10 @@ function ChatWorkspaceInner({
           messageId: crypto.randomUUID(),
           text,
         };
-        controller.textInput.setInput("");
-        attachments.clear();
+        const request = sendChatExchange(exchange);
+        clearSubmittedDraft();
         setIsUploadingAssets(false);
-        await sendChatExchange(exchange);
+        await request;
         successfulAssetsBySource.current.clear();
         void utils.assets.list.invalidate();
       } catch (error) {
@@ -1226,12 +1247,12 @@ function ChatWorkspaceInner({
         return;
       }
       if (isUploadingAssets) return;
-      if (status === "submitted" || status === "streaming") {
+      if (requestInFlightRef.current || status === "submitted" || status === "streaming") {
         return;
       }
       await uploadAndSend(message);
     },
-    [attachments, controller.textInput, isArchived, isUploadingAssets, model, status, uploadAndSend],
+    [attachments, controller.textInput, isArchived, isUploadingAssets, model, requestInFlightRef, status, uploadAndSend],
   );
 
   const isSubmitting = status === "submitted" || status === "streaming";
