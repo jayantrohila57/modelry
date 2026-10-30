@@ -215,10 +215,19 @@ import {
 
 const chatTransport = new DefaultChatTransport({
   api: "/api/ai/chat",
-  fetch: (input, init) => {
-    const timeoutSignal = AbortSignal.timeout(120_000);
-    const signal = init?.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal;
-    return fetch(input, { ...init, signal });
+  fetch: async (input, init) => {
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(
+      () => timeoutController.abort(new DOMException("Request timed out", "TimeoutError")),
+      120_000,
+    );
+    const signal = init?.signal ? AbortSignal.any([init.signal, timeoutController.signal]) : timeoutController.signal;
+
+    try {
+      return await fetch(input, { ...init, signal });
+    } finally {
+      clearTimeout(timeoutId);
+    }
   },
 });
 const CHAT_FILE_ACCEPT = ASSET_FILE_TYPES.map((extension) => `.${extension}`).join(",");
@@ -236,6 +245,7 @@ type ChatWorkspaceThread = {
 };
 
 type ChatWorkspaceProps = {
+  hasOlderMessages?: boolean;
   initialMessages?: PersistedChatMessage[];
   mode: "landing" | "thread";
   thread?: ChatWorkspaceThread | null;
@@ -762,7 +772,12 @@ function getAutoTitleCandidate(messages: UIMessage[]) {
   return preferredMessage ? deriveAutoThreadTitleFromText(getTextFromUiMessage(preferredMessage)) : "Untitled chat";
 }
 
-function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspaceProps) {
+function ChatWorkspaceInner({
+  hasOlderMessages: initialHasOlderMessages = false,
+  mode,
+  thread,
+  initialMessages = [],
+}: ChatWorkspaceProps) {
   const router = useRouter();
   const isMobile = useIsMobile();
   const { openSettings } = useSettingsDialog();
@@ -815,6 +830,9 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
   const [renameTitle, setRenameTitle] = useState(thread?.title ?? "");
+  const [hasOlderMessages, setHasOlderMessages] = useState(initialHasOlderMessages);
+  const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
+  const [olderMessagesCursor, setOlderMessagesCursor] = useState(initialMessages[0]?.id ?? "");
 
   const initialUiMessages = useMemo(() => mapPersistedMessagesToUiMessages(initialMessages), [initialMessages]);
   const viewer = getApiResponseData(viewerQuery.data) as ViewerSessionPayload | null;
@@ -960,6 +978,43 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
     },
     [runChatRequest, sendMessage],
   );
+
+  const loadEarlierMessages = useCallback(async () => {
+    if (!thread?.id || !hasOlderMessages || !olderMessagesCursor || isLoadingOlderMessages) return;
+
+    setIsLoadingOlderMessages(true);
+    try {
+      const response = await utils.chat.olderMessages.fetch({
+        beforeMessageId: olderMessagesCursor,
+        limit: 50,
+        threadId: thread.id,
+      });
+      const page = getApiResponseData(response) as {
+        hasOlderMessages: boolean;
+        messages: PersistedChatMessage[];
+      } | null;
+      if (!page) throw new Error(getApiResponseMessage(response, "Could not load earlier messages."));
+
+      const olderMessages = mapPersistedMessagesToUiMessages(page.messages);
+      setMessages((currentMessages) => {
+        const currentIds = new Set(currentMessages.map((message) => message.id));
+        return [...olderMessages.filter((message) => !currentIds.has(message.id)), ...currentMessages];
+      });
+      setHasOlderMessages(page.hasOlderMessages);
+      setOlderMessagesCursor(page.messages[0]?.id ?? "");
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, "Could not load earlier messages."));
+    } finally {
+      setIsLoadingOlderMessages(false);
+    }
+  }, [
+    hasOlderMessages,
+    isLoadingOlderMessages,
+    olderMessagesCursor,
+    setMessages,
+    thread?.id,
+    utils.chat.olderMessages,
+  ]);
 
   const retryFailedExchange = useCallback(async () => {
     const exchange = failedExchangeRef.current;
@@ -1534,6 +1589,19 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
             <Conversation>
               <ConversationScrollRestoration threadId={thread?.id ?? null} />
               <ConversationContent>
+                {hasOlderMessages ? (
+                  <div className="flex justify-center pb-2">
+                    <Button
+                      disabled={isLoadingOlderMessages || isSubmitting}
+                      onClick={() => void loadEarlierMessages()}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      {isLoadingOlderMessages ? "Loading earlier messages…" : "Load earlier messages"}
+                    </Button>
+                  </div>
+                ) : null}
                 {renderedMessages.length === 0 ? (
                   <MessageScroller.Item messageId="empty" scrollAnchor>
                     <EmptyConversationState mode={mode} />
@@ -2075,7 +2143,12 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
   );
 }
 
-export function ChatWorkspace({ mode, thread = null, initialMessages = [] }: ChatWorkspaceProps) {
+export function ChatWorkspace({
+  hasOlderMessages = false,
+  mode,
+  thread = null,
+  initialMessages = [],
+}: ChatWorkspaceProps) {
   const draftKey = createThreadDraftKey(thread?.id ?? null);
   const initialDraft = getThreadDraftSnapshot(draftKey) ?? { attachments: [], text: "" };
   const workspaceKey = createChatWorkspaceKey(thread?.id ?? null, Boolean(thread?.isArchived));
@@ -2086,7 +2159,12 @@ export function ChatWorkspace({ mode, thread = null, initialMessages = [] }: Cha
       initialInput={initialDraft.text}
       key={workspaceKey}
     >
-      <ChatWorkspaceInner initialMessages={initialMessages} mode={mode} thread={thread} />
+      <ChatWorkspaceInner
+        hasOlderMessages={hasOlderMessages}
+        initialMessages={initialMessages}
+        mode={mode}
+        thread={thread}
+      />
     </PromptInputProvider>
   );
 }

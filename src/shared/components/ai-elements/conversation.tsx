@@ -42,6 +42,7 @@ export const ConversationContent = ({ className, ...props }: ConversationContent
     <MessageScroller.Viewport
       aria-label="Chat messages"
       className="min-h-0 flex-1 overflow-y-auto overscroll-contain data-[pending-scroll]:invisible"
+      preserveScrollOnPrepend
       ref={viewportRef ?? undefined}
     >
       <MessageScroller.Content

@@ -14,6 +14,12 @@ export const getThreadInputSchema = z.object({
   threadId: z.string().uuid(),
 });
 
+export const getOlderThreadMessagesInputSchema = z.object({
+  threadId: z.string().uuid(),
+  beforeMessageId: z.string().min(1).max(128),
+  limit: z.number().int().min(1).max(100).default(50),
+});
+
 export const createThreadInputSchema = z.object({
   title: z.string().trim().min(1).max(120).optional(),
   model: z.string().trim().min(1).max(120).optional(),

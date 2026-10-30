@@ -29,6 +29,7 @@ export default async function ChatThreadPage({ params }: { params: Promise<{ thr
 
     return (
       <ChatWorkspace
+        hasOlderMessages={response.data.hasOlderMessages}
         initialMessages={response.data.messages as PersistedChatMessage[]}
         mode="thread"
         thread={{

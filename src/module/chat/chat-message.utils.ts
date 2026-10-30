@@ -41,6 +41,41 @@ export type PersistedMessageMetadata = {
   totalTokens?: number;
 };
 
+const ASSET_DOWNLOAD_URL_PATTERN =
+  /^\/api\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/download$/i;
+
+export function normalizeChatMessageParts(parts: unknown): UIMessage["parts"] {
+  if (!Array.isArray(parts)) return [];
+
+  return parts.flatMap((part): UIMessage["parts"] => {
+    if (!part || typeof part !== "object") return [];
+    const candidate = part as Record<string, unknown>;
+
+    if (candidate.type === "text" && typeof candidate.text === "string") {
+      return [{ type: "text" as const, text: candidate.text }];
+    }
+
+    if (
+      candidate.type === "file" &&
+      typeof candidate.url === "string" &&
+      ASSET_DOWNLOAD_URL_PATTERN.test(candidate.url) &&
+      typeof candidate.mediaType === "string" &&
+      (candidate.filename === undefined || typeof candidate.filename === "string")
+    ) {
+      return [
+        {
+          type: "file" as const,
+          url: candidate.url,
+          mediaType: candidate.mediaType,
+          ...(typeof candidate.filename === "string" ? { filename: candidate.filename } : {}),
+        },
+      ];
+    }
+
+    return [];
+  });
+}
+
 export function mapPersistedMessagesToUiMessages(messages: PersistedChatMessage[]): UIMessage[] {
   return messages.map((message) => {
     const legacyParts: UIMessage["parts"] = [
@@ -55,6 +90,28 @@ export function mapPersistedMessagesToUiMessages(messages: PersistedChatMessage[
         url: `/api/assets/${attachment.id}/download`,
       })),
     ];
+    const normalizedStoredParts = Array.isArray(message.parts)
+      ? message.parts.filter(
+          (part): part is UIMessage["parts"][number] =>
+            Boolean(part) && typeof part === "object" && typeof part.type === "string",
+        )
+      : [];
+    const storedParts = normalizedStoredParts.length ? normalizedStoredParts : legacyParts;
+    const existingAssetIds = new Set(
+      storedParts.flatMap((part) => {
+        if (!part || typeof part !== "object" || part.type !== "file") return [];
+        const match = part.url.match(/\/api\/assets\/([0-9a-f-]+)\/download/i);
+        return match ? [match[1]] : [];
+      }),
+    );
+    const missingAttachmentParts = (message.attachments ?? [])
+      .filter((attachment) => !existingAssetIds.has(attachment.id))
+      .map((attachment) => ({
+        type: "file" as const,
+        mediaType: attachment.mimeType,
+        filename: attachment.name,
+        url: `/api/assets/${attachment.id}/download`,
+      }));
 
     return {
       createdAt: message.createdAt,
@@ -72,7 +129,7 @@ export function mapPersistedMessagesToUiMessages(messages: PersistedChatMessage[
         threadId: message.threadId,
         totalTokens: message.totalTokens,
       } satisfies PersistedMessageMetadata,
-      parts: message.parts?.length ? message.parts : legacyParts,
+      parts: [...storedParts, ...missingAttachmentParts],
       role: message.role === "tool" ? "assistant" : message.role,
     };
   });

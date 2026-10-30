@@ -15,6 +15,7 @@ import {
   getTemperatureFromPreset,
 } from "@/module/chat/chat.runtime";
 import { failAssistantMessage } from "@/module/chat/chat.service";
+import { normalizeChatMessageParts } from "@/module/chat/chat-message.utils";
 import { settleReservedCredits } from "@/module/credits/credits.service";
 import { jsonFailure } from "@/shared/config/api.utils";
 import { debugError } from "@/shared/utils/lib/logger.utils";
@@ -33,7 +34,18 @@ const requestSchema = z.object({
   webSearch: z.boolean().optional(),
   assetIds: z.array(z.string().uuid()).max(5).optional().default([]),
   operation: z.enum(["edit", "regenerate"]).optional(),
-  messages: z.array(z.custom<UIMessage>()).min(1),
+  messages: z
+    .array(
+      z
+        .object({
+          id: z.string().min(1).max(128),
+          role: z.enum(["system", "user", "assistant", "tool"]),
+          parts: z.unknown().optional(),
+        })
+        .passthrough()
+        .transform((message) => ({ ...message, parts: normalizeChatMessageParts(message.parts) }) as UIMessage),
+    )
+    .min(1),
 });
 
 function buildErrorResponse(error: unknown) {
