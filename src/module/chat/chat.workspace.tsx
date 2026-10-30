@@ -29,6 +29,8 @@ import {
 import { AssetFileIcon } from "@/module/assets/asset-file-icon";
 import { AssetUploadSteps } from "@/module/assets/asset-upload-steps";
 import { type AssetUploadProgress, uploadAndProcessAsset } from "@/module/assets/assets.upload";
+import { createChatWorkspaceKey } from "@/module/chat/chat.navigation";
+import { createRetryChatRequest, resolveChatRequestThreadId } from "@/module/chat/chat.request.utils";
 import {
   Attachment,
   AttachmentPreview,
@@ -666,6 +668,8 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
   const { openSettings } = useSettingsDialog();
   const utils = apiClient.useUtils();
   const draftKey = createThreadDraftKey(thread?.id ?? null);
+  const clientThreadId = useRef(thread?.id ?? crypto.randomUUID());
+  const requestThreadId = resolveChatRequestThreadId(thread?.id, clientThreadId.current);
   const controller = usePromptInputController();
   const attachments = useProviderAttachments();
   const viewerQuery = apiClient.viewer.session.useQuery(undefined, { refetchOnWindowFocus: false });
@@ -678,6 +682,19 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
   const [threadTitle, setThreadTitle] = useState(thread?.title ?? "Untitled chat");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [messageQueue, setMessageQueue] = useState<PromptInputMessage[]>([]);
+  const failedExchangeRef = useRef<{
+    body: {
+      assetIds: string[];
+      model: string;
+      reasoningEnabled: boolean;
+      reasoningLevel: ChatReasoningLevel;
+      threadId: string;
+      webSearch: boolean;
+    };
+    files: FileUIPart[];
+    messageId: string;
+    text: string;
+  } | null>(null);
   const [assetUploads, setAssetUploads] = useState<
     Array<{ id: string; name: string; sizeBytes: number; progress: AssetUploadProgress }>
   >([]);
@@ -723,10 +740,12 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
     messages: initialUiMessages,
     onError: (nextError) => {
       toast.error(nextError.message || "Failed to send chat message.");
-      // Clear queue on error to prevent stuck messages
-      setMessageQueue([]);
+      if (failedExchangeRef.current?.text && !controller.textInput.value.trim()) {
+        controller.textInput.setInput(failedExchangeRef.current.text);
+      }
     },
     onFinish: ({ message }) => {
+      failedExchangeRef.current = null;
       setAssetUploads([]);
       invalidateThreadLists();
       void utils.viewer.session.invalidate();
@@ -759,6 +778,23 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
     },
     transport: chatTransport,
   });
+
+  const sendChatExchange = useCallback(
+    async (exchange: NonNullable<typeof failedExchangeRef.current>) => {
+      failedExchangeRef.current = exchange;
+      const retryRequest = createRetryChatRequest(exchange);
+      await sendMessage(retryRequest.message, { body: retryRequest.body });
+    },
+    [sendMessage],
+  );
+
+  const retryFailedExchange = useCallback(async () => {
+    const exchange = failedExchangeRef.current;
+    if (!exchange) return;
+
+    const retryRequest = createRetryChatRequest(exchange);
+    await sendMessage(retryRequest.message, { body: retryRequest.body });
+  }, [sendMessage]);
 
   const renderedMessages = useMemo(() => mapUiMessagesToWorkspaceMessages(messages), [messages]);
   const reasoningSupported = selectedModelData?.supportsReasoning ?? true;
@@ -867,17 +903,30 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
         return;
       }
 
-      await sendMessage(message, {
+      await sendChatExchange({
         body: {
+          assetIds: [],
           model,
           reasoningEnabled,
           reasoningLevel,
-          threadId: thread?.id,
+          threadId: requestThreadId,
           webSearch: useWebSearch,
         },
+        files: [],
+        messageId: crypto.randomUUID(),
+        text: message.text,
       });
     },
-    [isArchived, status, messageQueue.length, model, reasoningEnabled, reasoningLevel, sendMessage, thread?.id],
+    [
+      isArchived,
+      status,
+      messageQueue.length,
+      model,
+      reasoningEnabled,
+      reasoningLevel,
+      sendChatExchange,
+      requestThreadId,
+    ],
   );
 
   const handleRename = useCallback(async () => {
@@ -951,19 +1000,23 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
   const uploadAndSend = useCallback(
     async (message: PromptInputMessage) => {
       if (!message.files.length) {
-        const outgoing = message.text.trim() ? { text: message.text.trim() } : { text: "" };
-        controller.textInput.setInput("");
-        attachments.clear();
-        await sendMessage(outgoing, {
+        const text = message.text.trim() ? message.text.trim() : "";
+        const exchange = {
           body: {
+            assetIds: [],
             model,
             reasoningEnabled,
             reasoningLevel,
-            threadId: thread?.id,
+            threadId: requestThreadId,
             webSearch: useWebSearch,
-            assetIds: [],
           },
-        });
+          files: [] as FileUIPart[],
+          messageId: crypto.randomUUID(),
+          text,
+        };
+        controller.textInput.setInput("");
+        attachments.clear();
+        await sendChatExchange(exchange);
         return;
       }
 
@@ -1032,22 +1085,23 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
         const text =
           message.text.trim() ||
           "Please briefly summarize each uploaded document and call out its main topics and useful details.";
+        const exchange = {
+          body: {
+            assetIds: uploadedFiles.map((item) => item.assetId),
+            model,
+            reasoningEnabled,
+            reasoningLevel,
+            threadId: requestThreadId,
+            webSearch: useWebSearch,
+          },
+          files: uploadedFiles.map((item) => item.file),
+          messageId: crypto.randomUUID(),
+          text,
+        };
         controller.textInput.setInput("");
         attachments.clear();
         setIsUploadingAssets(false);
-        await sendMessage(
-          { text, files: uploadedFiles.map((item) => item.file) },
-          {
-            body: {
-              model,
-              reasoningEnabled,
-              reasoningLevel,
-              threadId: thread?.id,
-              webSearch: useWebSearch,
-              assetIds: uploadedFiles.map((item) => item.assetId),
-            },
-          },
-        );
+        await sendChatExchange(exchange);
         successfulAssetsBySource.current.clear();
         void utils.assets.list.invalidate();
       } catch (error) {
@@ -1073,8 +1127,8 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
       model,
       reasoningEnabled,
       reasoningLevel,
-      sendMessage,
-      thread?.id,
+      requestThreadId,
+      sendChatExchange,
       useWebSearch,
       utils.assets.list,
     ],
@@ -1330,6 +1384,17 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
                 </div>
               )}
               <div className="w-full p-2">
+                {status === "error" && failedExchangeRef.current ? (
+                  <Alert className="mb-2" variant="destructive">
+                    <AlertTitle>Message wasn’t sent</AlertTitle>
+                    <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+                      <span>Your message and attached files are ready to retry.</span>
+                      <Button onClick={() => void retryFailedExchange()} size="sm" type="button" variant="outline">
+                        Retry message
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
                 <PromptInput globalDrop multiple onSubmit={handleSend}>
                   <PromptInputHeader>
                     <PromptInputAttachmentsDisplay />
@@ -1542,7 +1607,7 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
 export function ChatWorkspace({ mode, thread = null, initialMessages = [] }: ChatWorkspaceProps) {
   const draftKey = createThreadDraftKey(thread?.id ?? null);
   const initialDraft = getThreadDraftSnapshot(draftKey) ?? { attachments: [], text: "" };
-  const workspaceKey = `${draftKey}:${thread?.lastMessageAt?.toISOString?.() ?? "landing"}:${initialMessages.length}:${thread?.isArchived ? "archived" : "active"}`;
+  const workspaceKey = createChatWorkspaceKey(thread?.id ?? null, Boolean(thread?.isArchived));
 
   return (
     <PromptInputProvider

@@ -1,13 +1,14 @@
 "use client";
 
-import { ArchiveRestore, MessageCircle, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { ArchiveRestore, MessageCircle, MoreHorizontal, Pencil, Pin, Trash2 } from "lucide-react";
 import type { Route } from "next";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { apiClient, getApiErrorMessage, getApiResponseData, getApiResponseMessage } from "@/core/api/api.client";
 import { CHAT_ARCHIVED_THREADS_LIMIT, CHAT_RECENT_THREADS_LIMIT } from "@/module/chat/chat.data";
+import { groupThreadsByActivity } from "@/module/chat/chat.navigation";
 import { PATH } from "@/shared/config/routes";
 import {
   AlertDialog,
@@ -39,6 +40,8 @@ import { SidebarNavSkeleton } from "./sidebar.nav-skeleton";
 type ThreadListItem = {
   deletedAt: Date | null;
   id: string;
+  isPinned: boolean;
+  lastMessageAt: Date;
   title: string;
 };
 
@@ -59,6 +62,7 @@ function ThreadActions({ thread, archived }: { thread: ThreadListItem; archived:
   const isActive = pathname === PATH.CHAT.THREAD(thread.id);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [renameTitle, setRenameTitle] = useState(thread.title);
 
   const renameThread = apiClient.chat.rename.useMutation({
@@ -106,6 +110,26 @@ function ThreadActions({ thread, archived }: { thread: ThreadListItem; archived:
     },
   });
 
+  const pinThread = apiClient.chat.pin.useMutation({
+    onError: (error) => toast.error(getApiErrorMessage(error, "Failed to update pinned chat.")),
+    onSuccess: (response) =>
+      toast.success(getApiResponseMessage(response, thread.isPinned ? "Chat unpinned." : "Chat pinned.")),
+    onSettled: () => {
+      invalidateLists();
+      void utils.chat.get.invalidate({ threadId: thread.id });
+    },
+  });
+
+  const deleteThread = apiClient.chat.delete.useMutation({
+    onError: (error) => toast.error(getApiErrorMessage(error, "Failed to delete chat.")),
+    onSuccess: (response) => {
+      toast.success(getApiResponseMessage(response, "Chat permanently deleted."));
+      setDeleteDialogOpen(false);
+      if (isActive) router.push(PATH.CHAT.ROOT);
+    },
+    onSettled: invalidateLists,
+  });
+
   const handleRename = async () => {
     const trimmedTitle = renameTitle.trim();
     if (!trimmedTitle || trimmedTitle === thread.title) {
@@ -131,7 +155,12 @@ function ThreadActions({ thread, archived }: { thread: ThreadListItem; archived:
     setRenameDialogOpen(true);
   };
 
-  const isBusy = renameThread.isPending || archiveThread.isPending || restoreThread.isPending;
+  const isBusy =
+    renameThread.isPending ||
+    archiveThread.isPending ||
+    restoreThread.isPending ||
+    pinThread.isPending ||
+    deleteThread.isPending;
 
   return (
     <>
@@ -149,6 +178,15 @@ function ThreadActions({ thread, archived }: { thread: ThreadListItem; archived:
               Rename
             </DropdownMenuItem>
           ) : null}
+          {!archived ? (
+            <DropdownMenuItem
+              disabled={isBusy}
+              onClick={() => void pinThread.mutateAsync({ threadId: thread.id, isPinned: !thread.isPinned })}
+            >
+              <Pin className="size-4" />
+              {thread.isPinned ? "Unpin" : "Pin"}
+            </DropdownMenuItem>
+          ) : null}
           {archived ? (
             <DropdownMenuItem disabled={isBusy} onClick={() => void handleRestore()}>
               <ArchiveRestore className="size-4" />
@@ -164,6 +202,12 @@ function ThreadActions({ thread, archived }: { thread: ThreadListItem; archived:
               Archive
             </DropdownMenuItem>
           )}
+          {archived ? (
+            <DropdownMenuItem disabled={isBusy} onClick={() => setDeleteDialogOpen(true)} variant="destructive">
+              <Trash2 className="size-4" />
+              Delete permanently
+            </DropdownMenuItem>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -223,6 +267,26 @@ function ThreadActions({ thread, archived }: { thread: ThreadListItem; archived:
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog onOpenChange={setDeleteDialogOpen} open={deleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete chat permanently?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes the conversation and its messages. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleteThread.isPending}
+              onClick={() => void deleteThread.mutateAsync({ threadId: thread.id })}
+            >
+              Delete permanently
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -237,6 +301,7 @@ function ThreadItem({ archived, thread }: { archived: boolean; thread: ThreadLis
         <Link href={PATH.CHAT.THREAD(thread.id)}>
           <MessageCircle className="size-4" />
           <span className="truncate">{thread.title}</span>
+          {thread.isPinned ? <Pin aria-label="Pinned" className="ml-auto size-3.5 shrink-0" /> : null}
           {archived ? (
             <Badge className="ml-auto" variant="outline">
               Archived
@@ -269,33 +334,113 @@ function ThreadGroup({ archived, label }: { archived: boolean; label: string }) 
     return null;
   }
 
+  const groups = archived ? [{ label, threads }] : groupThreadsByActivity(threads);
+
   return (
-    <SidebarGroup className="group-data-[collapsible=icon]:hidden">
-      <SidebarGroupLabel>{label}</SidebarGroupLabel>
-      <SidebarGroupContent>
-        <SidebarMenu>
-          {threads.map((thread) => (
-            <ThreadItem archived={archived} key={thread.id} thread={thread} />
-          ))}
-          {hasMore && (
-            <SidebarMenuItem>
-              <SidebarMenuButton asChild>
-                <Link href={(archived ? PATH.CHAT.ARCHIVE : PATH.CHAT.ALL) as Route}>
-                  <span className="text-muted-foreground text-sm">...more</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          )}
-        </SidebarMenu>
-      </SidebarGroupContent>
-    </SidebarGroup>
+    <>
+      {groups.map((group, index) => (
+        <SidebarGroup className="group-data-[collapsible=icon]:hidden" key={group.label}>
+          <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {group.threads.map((thread) => (
+                <ThreadItem archived={archived} key={thread.id} thread={thread} />
+              ))}
+              {hasMore && index === groups.length - 1 && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild>
+                    <Link href={(archived ? PATH.CHAT.ARCHIVE : PATH.CHAT.ALL) as Route}>
+                      <span className="text-muted-foreground text-sm">...more</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      ))}
+    </>
   );
 }
 
 export function NavRecentChats() {
-  return <ThreadGroup archived={false} label="Recent chats" />;
+  return (
+    <>
+      <ChatSearch />
+      <ThreadGroup archived={false} label="Recent chats" />
+    </>
+  );
 }
 
 export function NavArchivedChats() {
   return <ThreadGroup archived label="Archived" />;
+}
+
+function ChatSearch() {
+  const [search, setSearch] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const query = search.trim();
+  const searchQuery = apiClient.chat.list.useQuery(
+    { archived: false, limit: 20, offset: 0, search: query },
+    { enabled: query.length > 0, refetchOnWindowFocus: false },
+  );
+  const results = (getApiResponseData(searchQuery.data) ?? []) as ThreadListItem[];
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        inputRef.current?.focus();
+      }
+      if (event.key === "Escape" && document.activeElement === inputRef.current) {
+        setSearch("");
+        inputRef.current?.blur();
+      }
+    };
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, []);
+
+  return (
+    <SidebarGroup className="group-data-[collapsible=icon]:hidden">
+      <SidebarGroupLabel>Search chats</SidebarGroupLabel>
+      <SidebarGroupContent className="space-y-2">
+        <Input
+          aria-label="Search conversations by title or message"
+          autoComplete="off"
+          maxLength={120}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search conversations"
+          ref={inputRef}
+          value={search}
+        />
+        {query ? (
+          searchQuery.isPending ? (
+            <SidebarNavSkeleton />
+          ) : searchQuery.isError ? (
+            <p className="px-2 text-xs text-destructive" role="alert">
+              {getApiErrorMessage(searchQuery.error, "Could not search conversations.")}
+            </p>
+          ) : results.length ? (
+            <SidebarMenu>
+              {results.map((thread) => (
+                <ThreadItem archived={false} key={thread.id} thread={thread} />
+              ))}
+              {results.length === 20 ? (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild>
+                    <Link href={`${PATH.CHAT.ALL}?${new URLSearchParams({ q: query })}` as Route}>
+                      View all results
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ) : null}
+            </SidebarMenu>
+          ) : (
+            <p className="px-2 text-xs text-muted-foreground">No matching chats.</p>
+          )
+        ) : null}
+      </SidebarGroupContent>
+    </SidebarGroup>
+  );
 }

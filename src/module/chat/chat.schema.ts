@@ -6,6 +6,8 @@ export const persistedMessageStatusSchema = z.enum(["pending", "streaming", "com
 export const listThreadsInputSchema = z.object({
   archived: z.boolean().default(false),
   limit: z.number().int().min(1).max(100).default(50),
+  offset: z.number().int().min(0).default(0),
+  search: z.string().trim().max(120).default(""),
 });
 
 export const getThreadInputSchema = z.object({
@@ -26,8 +28,15 @@ export const archiveThreadInputSchema = z.object({
   threadId: z.string().uuid(),
 });
 
+export const deleteThreadInputSchema = archiveThreadInputSchema;
+
 export const restoreThreadInputSchema = z.object({
   threadId: z.string().uuid(),
+});
+
+export const pinThreadInputSchema = z.object({
+  threadId: z.string().uuid(),
+  isPinned: z.boolean(),
 });
 
 export const finalizeAssistantMessageInputSchema = z.object({
