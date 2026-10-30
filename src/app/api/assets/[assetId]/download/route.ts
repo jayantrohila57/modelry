@@ -16,11 +16,21 @@ export async function GET(_request: Request, { params }: { params: Promise<{ ass
     const { assetId } = await params;
     const asset = await getAssetForUser(user.id, assetId);
     if (!asset.pathname) {
-      return jsonFailure({ message: "File is no longer available", code: "NOT_FOUND", kind: "not_found", httpStatus: 404 });
+      return jsonFailure({
+        message: "File is no longer available",
+        code: "NOT_FOUND",
+        kind: "not_found",
+        httpStatus: 404,
+      });
     }
     const blob = await get(asset.pathname, { access: "private" });
     if (!blob || blob.statusCode !== 200) {
-      return jsonFailure({ message: "File is no longer available", code: "NOT_FOUND", kind: "not_found", httpStatus: 404 });
+      return jsonFailure({
+        message: "File is no longer available",
+        code: "NOT_FOUND",
+        kind: "not_found",
+        httpStatus: 404,
+      });
     }
 
     const disposition = asset.fileType === "html" ? "attachment" : "inline";

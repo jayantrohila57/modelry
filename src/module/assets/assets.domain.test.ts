@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAssetPathname, getAssetContentDisposition, getAssetFileType, getProcessingProgress, isAssetPathOwnedByUser, splitTextIntoChunks, validateAssetUpload } from "./assets.domain";
+import {
+  buildAssetPathname,
+  getAssetContentDisposition,
+  getAssetFileType,
+  getProcessingProgress,
+  isAssetPathOwnedByUser,
+  splitTextIntoChunks,
+  validateAssetContent,
+  validateAssetUpload,
+} from "./assets.domain";
 
 test("asset upload validation accepts supported text-bearing document types", () => {
   assert.deepEqual(
@@ -15,9 +24,20 @@ test("asset upload validation rejects unsupported types and oversized documents"
     false,
   );
   assert.equal(
-    validateAssetUpload({ name: "report.pdf", mimeType: "application/pdf", sizeBytes: 10_001, maxSizeBytes: 10_000 }).ok,
+    validateAssetUpload({ name: "report.pdf", mimeType: "application/pdf", sizeBytes: 10_001, maxSizeBytes: 10_000 })
+      .ok,
     false,
   );
+});
+
+test("asset content validation rejects bytes that do not match the declared document type", () => {
+  assert.deepEqual(validateAssetContent(new TextEncoder().encode("not a PDF"), "pdf").ok, false);
+  assert.deepEqual(validateAssetContent(new TextEncoder().encode("PK\u0003\u0004word/document.xml"), "docx"), {
+    ok: true,
+  });
+  assert.deepEqual(validateAssetContent(new TextEncoder().encode("PK\u0003\u0004other.xml"), "docx").ok, false);
+  assert.deepEqual(validateAssetContent(new Uint8Array([0, 255]), "txt").ok, false);
+  assert.deepEqual(validateAssetContent(new TextEncoder().encode("hello"), "txt"), { ok: true });
 });
 
 test("file type derives from a safe normalized extension", () => {

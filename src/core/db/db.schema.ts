@@ -1,5 +1,19 @@
-import { relations } from "drizzle-orm";
-import { bigint, boolean, customType, foreignKey, index, integer, jsonb, pgTable, text, timestamp, unique, uniqueIndex } from "drizzle-orm/pg-core";
+import { relations, sql } from "drizzle-orm";
+import {
+  bigint,
+  boolean,
+  customType,
+  foreignKey,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  unique,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
 
 const vector768 = customType<{ data: number[]; driverData: string }>({
   dataType: () => "vector(768)",
@@ -255,6 +269,7 @@ export const chatAttachment = pgTable(
       .default("queued"),
     processingProgress: integer("processing_progress").notNull().default(0),
     processingError: text("processing_error"),
+    processingStartedAt: timestamp("processing_started_at", { withTimezone: true }),
     indexedAt: timestamp("indexed_at", { withTimezone: true }),
     ...timestamps,
   },
@@ -267,6 +282,34 @@ export const chatAttachment = pgTable(
     byUserFileTypeIdx: index("chat_attachment_user_file_type_idx").on(table.userId, table.fileType),
     byUserFolderIdx: index("chat_attachment_user_folder_idx").on(table.userId, table.folderId),
     byUserProcessingIdx: index("chat_attachment_user_processing_idx").on(table.userId, table.processingStatus),
+    pathnameUniqueIdx: uniqueIndex("chat_attachment_pathname_unique_idx")
+      .on(table.pathname)
+      .where(sql`${table.pathname} is not null`),
+  }),
+);
+
+export const chatMessageAsset = pgTable(
+  "chat_message_asset",
+  {
+    messageId: text("message_id")
+      .notNull()
+      .references(() => chatMessage.id, { onDelete: "cascade" }),
+    assetId: text("asset_id").notNull(),
+    userId: text("user_id").notNull(),
+    threadId: text("thread_id")
+      .notNull()
+      .references(() => chatThread.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.messageId, table.assetId] }),
+    assetOwnerFk: foreignKey({
+      name: "chat_message_asset_owner_fk",
+      columns: [table.assetId, table.userId],
+      foreignColumns: [chatAttachment.id, chatAttachment.userId],
+    }).onDelete("cascade"),
+    byThreadIdx: index("chat_message_asset_thread_idx").on(table.threadId, table.messageId),
+    byAssetIdx: index("chat_message_asset_asset_idx").on(table.assetId),
   }),
 );
 
@@ -274,9 +317,7 @@ export const assetChunk = pgTable(
   "asset_chunk",
   {
     id: text("id").primaryKey(),
-    assetId: text("asset_id")
-      .notNull()
-      .notNull(),
+    assetId: text("asset_id").notNull().notNull(),
     userId: text("user_id").notNull(),
     chunkIndex: integer("chunk_index").notNull(),
     content: text("content").notNull(),
@@ -531,6 +572,7 @@ export const chatThreadRelations = relations(chatThread, ({ one, many }) => ({
   }),
   messages: many(chatMessage),
   attachments: many(chatAttachment),
+  messageAssets: many(chatMessageAsset),
 }));
 
 export const chatMessageRelations = relations(chatMessage, ({ one, many }) => ({
@@ -543,6 +585,13 @@ export const chatMessageRelations = relations(chatMessage, ({ one, many }) => ({
     references: [user.id],
   }),
   attachments: many(chatAttachment),
+  assets: many(chatMessageAsset),
+}));
+
+export const chatMessageAssetRelations = relations(chatMessageAsset, ({ one }) => ({
+  message: one(chatMessage, { fields: [chatMessageAsset.messageId], references: [chatMessage.id] }),
+  asset: one(chatAttachment, { fields: [chatMessageAsset.assetId], references: [chatAttachment.id] }),
+  thread: one(chatThread, { fields: [chatMessageAsset.threadId], references: [chatThread.id] }),
 }));
 
 export const chatAttachmentRelations = relations(chatAttachment, ({ one, many }) => ({

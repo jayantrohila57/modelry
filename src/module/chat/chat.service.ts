@@ -2,7 +2,7 @@ import { TRPCError } from "@trpc/server";
 import type { UIMessage } from "ai";
 import { and, asc, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/core/db/db";
-import { chatAttachment, chatMessage, chatThread, usageEvent } from "@/core/db/db.schema";
+import { chatAttachment, chatMessage, chatMessageAsset, chatThread, usageEvent } from "@/core/db/db.schema";
 import { extractPlainTextFromMessage } from "@/module/ai/ai.tokens";
 import type { PersistedChatMessage } from "./chat-message.utils";
 
@@ -155,12 +155,41 @@ export async function createThread(input: { userId: string; title?: string; mode
 export async function getThread(userId: string, threadId: string) {
   const thread = await requireOwnedThread(userId, threadId, { allowArchived: true });
   const messages = await listThreadMessages(threadId);
-  const attachments = await db
-    .select({ id: chatAttachment.id, messageId: chatAttachment.messageId, name: chatAttachment.name, mimeType: chatAttachment.mimeType })
-    .from(chatAttachment)
-    .where(and(eq(chatAttachment.threadId, threadId), eq(chatAttachment.userId, userId), isNotNull(chatAttachment.messageId)));
-  const attachmentsByMessage = new Map<string, typeof attachments>();
-  for (const attachment of attachments) {
+  const [legacyAttachments, linkedAssets] = await Promise.all([
+    db
+      .select({
+        id: chatAttachment.id,
+        messageId: chatAttachment.messageId,
+        name: chatAttachment.name,
+        mimeType: chatAttachment.mimeType,
+      })
+      .from(chatAttachment)
+      .where(
+        and(
+          eq(chatAttachment.threadId, threadId),
+          eq(chatAttachment.userId, userId),
+          isNotNull(chatAttachment.messageId),
+        ),
+      ),
+    db
+      .select({
+        id: chatAttachment.id,
+        messageId: chatMessageAsset.messageId,
+        name: chatAttachment.name,
+        mimeType: chatAttachment.mimeType,
+      })
+      .from(chatMessageAsset)
+      .innerJoin(
+        chatAttachment,
+        and(eq(chatAttachment.id, chatMessageAsset.assetId), eq(chatAttachment.userId, chatMessageAsset.userId)),
+      )
+      .where(and(eq(chatMessageAsset.threadId, threadId), eq(chatMessageAsset.userId, userId))),
+  ]);
+  const attachmentsByMessage = new Map<
+    string,
+    Array<{ id: string; messageId: string | null; name: string; mimeType: string }>
+  >();
+  for (const attachment of [...legacyAttachments, ...linkedAssets]) {
     if (!attachment.messageId) continue;
     const current = attachmentsByMessage.get(attachment.messageId) ?? [];
     current.push(attachment);
@@ -171,7 +200,11 @@ export async function getThread(userId: string, threadId: string) {
     isArchived: Boolean(thread.deletedAt),
     messages: messages.map((message) => ({
       ...message,
-      attachments: (attachmentsByMessage.get(message.id) ?? []).map(({ id, name, mimeType }) => ({ id, name, mimeType })),
+      attachments: (attachmentsByMessage.get(message.id) ?? []).map(({ id, name, mimeType }) => ({
+        id,
+        name,
+        mimeType,
+      })),
     })),
     thread,
     usageTotals: calculateThreadUsageTotals(messages),

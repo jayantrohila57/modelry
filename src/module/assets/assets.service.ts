@@ -1,10 +1,10 @@
-import { del, head } from "@vercel/blob";
 import { TRPCError } from "@trpc/server";
-import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, ne, or } from "drizzle-orm";
+import { del, get, head } from "@vercel/blob";
+import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/core/db/db";
-import { assetChunk, assetFolder, chatAttachment } from "@/core/db/db.schema";
+import { assetChunk, assetFolder, chatAttachment, chatMessage, chatMessageAsset } from "@/core/db/db.schema";
 import { serverEnv } from "@/shared/config/env.server";
-import { getAssetFileType, isAssetPathOwnedByUser, validateAssetUpload } from "./assets.domain";
+import { getAssetFileType, isAssetPathOwnedByUser, validateAssetContent, validateAssetUpload } from "./assets.domain";
 
 const createId = () => crypto.randomUUID();
 
@@ -14,18 +14,32 @@ export async function listAssets(input: {
   fileType?: string;
   category?: string;
   folderId?: string;
+  page?: number;
 }) {
-  const filters = [eq(chatAttachment.userId, input.userId), ne(chatAttachment.status, "deleted"), isNotNull(chatAttachment.pathname)];
+  const page = input.page ?? 1;
+  const pageSize = 50;
+  const filters = [
+    eq(chatAttachment.userId, input.userId),
+    ne(chatAttachment.status, "deleted"),
+    isNotNull(chatAttachment.pathname),
+  ];
   if (input.fileType) filters.push(eq(chatAttachment.fileType, input.fileType));
   if (input.category) filters.push(eq(chatAttachment.category, input.category));
   if (input.folderId === "root") filters.push(isNull(chatAttachment.folderId));
   else if (input.folderId) filters.push(eq(chatAttachment.folderId, input.folderId));
   if (input.search) {
     const term = `%${input.search.replace(/[\\%_]/g, "\\$&")}%`;
-    filters.push(or(ilike(chatAttachment.name, term), ilike(chatAttachment.summary, term))!);
+    filters.push(
+      or(
+        ilike(chatAttachment.name, term),
+        ilike(chatAttachment.summary, term),
+        ilike(chatAttachment.extractedText, term),
+        ilike(sql`${chatAttachment.extractedMetadata}::text`, term),
+      )!,
+    );
   }
 
-  const [assets, folders] = await Promise.all([
+  const [assets, folders, [totalRow], categoryRows] = await Promise.all([
     db
       .select({
         id: chatAttachment.id,
@@ -47,18 +61,38 @@ export async function listAssets(input: {
       .from(chatAttachment)
       .where(and(...filters))
       .orderBy(desc(chatAttachment.createdAt))
-      .limit(200),
+      .limit(pageSize)
+      .offset((page - 1) * pageSize),
     db
       .select({ id: assetFolder.id, name: assetFolder.name, createdAt: assetFolder.createdAt })
       .from(assetFolder)
       .where(eq(assetFolder.userId, input.userId))
       .orderBy(asc(assetFolder.name)),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(chatAttachment)
+      .where(and(...filters)),
+    db
+      .selectDistinct({ category: chatAttachment.category })
+      .from(chatAttachment)
+      .where(
+        and(
+          eq(chatAttachment.userId, input.userId),
+          ne(chatAttachment.status, "deleted"),
+          isNotNull(chatAttachment.pathname),
+        ),
+      )
+      .orderBy(asc(chatAttachment.category)),
   ]);
 
   return {
     assets,
     folders,
-    categories: [...new Set(assets.map((asset) => asset.category))].sort((a, b) => a.localeCompare(b)),
+    page,
+    pageSize,
+    total: totalRow?.count ?? 0,
+    totalPages: Math.ceil((totalRow?.count ?? 0) / pageSize),
+    categories: categoryRows.map((row) => row.category),
   };
 }
 
@@ -77,7 +111,13 @@ export async function createAsset(input: {
     throw new TRPCError({ code: "BAD_REQUEST", message: "Invalid upload path." });
   }
 
-  let blob;
+  const existingAsset = await db.query.chatAttachment.findFirst({
+    where: and(eq(chatAttachment.pathname, input.pathname), eq(chatAttachment.userId, input.userId)),
+    columns: { id: true },
+  });
+  if (existingAsset) return existingAsset.id;
+
+  let blob: Awaited<ReturnType<typeof head>>;
   try {
     blob = await head(input.pathname);
   } catch {
@@ -93,6 +133,26 @@ export async function createAsset(input: {
   });
   if (!validation.ok) throw new TRPCError({ code: "BAD_REQUEST", message: validation.reason });
 
+  let storedBlob: Awaited<ReturnType<typeof get>>;
+  try {
+    storedBlob = await get(blob.pathname, { access: "private" });
+  } catch {
+    await del(blob.pathname);
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Uploaded file could not be inspected." });
+  }
+  if (!storedBlob || storedBlob.statusCode !== 200) {
+    await del(blob.pathname);
+    throw new TRPCError({ code: "NOT_FOUND", message: "Uploaded file could not be inspected." });
+  }
+  const contentValidation = validateAssetContent(
+    new Uint8Array(await new Response(storedBlob.stream).arrayBuffer()),
+    validation.fileType,
+  );
+  if (!contentValidation.ok) {
+    await del(blob.pathname);
+    throw new TRPCError({ code: "BAD_REQUEST", message: contentValidation.reason });
+  }
+
   if (input.folderId) {
     const folder = await db.query.assetFolder.findFirst({
       where: and(eq(assetFolder.id, input.folderId), eq(assetFolder.userId, input.userId)),
@@ -102,21 +162,31 @@ export async function createAsset(input: {
   }
 
   const id = createId();
-  await db.insert(chatAttachment).values({
-    id,
-    userId: input.userId,
-    name: input.name,
-    url: blob.url,
-    pathname: blob.pathname,
-    mimeType: blob.contentType || input.mimeType,
-    sizeBytes: blob.size,
-    fileType,
-    folderId: input.folderId ?? null,
-    processingStatus: "queued",
-    processingProgress: 0,
-  });
+  const [registered] = await db
+    .insert(chatAttachment)
+    .values({
+      id,
+      userId: input.userId,
+      name: input.name,
+      url: blob.url,
+      pathname: blob.pathname,
+      mimeType: blob.contentType || input.mimeType,
+      sizeBytes: blob.size,
+      fileType,
+      folderId: input.folderId ?? null,
+      processingStatus: "queued",
+      processingProgress: 0,
+    })
+    .onConflictDoNothing()
+    .returning({ id: chatAttachment.id });
 
-  return id;
+  if (registered) return registered.id;
+  const existing = await db.query.chatAttachment.findFirst({
+    where: and(eq(chatAttachment.pathname, blob.pathname), eq(chatAttachment.userId, input.userId)),
+    columns: { id: true },
+  });
+  if (existing) return existing.id;
+  throw new TRPCError({ code: "CONFLICT", message: "This file has already been registered." });
 }
 
 export async function createFolder(userId: string, name: string) {
@@ -163,7 +233,13 @@ export async function getAssetStatuses(userId: string, assetIds: string[]) {
       name: chatAttachment.name,
     })
     .from(chatAttachment)
-    .where(and(eq(chatAttachment.userId, userId), inArray(chatAttachment.id, assetIds), ne(chatAttachment.status, "deleted")));
+    .where(
+      and(
+        eq(chatAttachment.userId, userId),
+        inArray(chatAttachment.id, assetIds),
+        ne(chatAttachment.status, "deleted"),
+      ),
+    );
 }
 
 export async function renameAsset(userId: string, assetId: string, name: string) {
@@ -228,6 +304,7 @@ export async function getAssetForUser(userId: string, assetId: string) {
       fileType: chatAttachment.fileType,
       status: chatAttachment.status,
       processingStatus: chatAttachment.processingStatus,
+      processingStartedAt: chatAttachment.processingStartedAt,
     })
     .from(chatAttachment)
     .where(and(eq(chatAttachment.id, assetId), eq(chatAttachment.userId, userId), ne(chatAttachment.status, "deleted")))
@@ -238,7 +315,8 @@ export async function getAssetForUser(userId: string, assetId: string) {
 
 export async function validateAssetsForChat(userId: string, assetIds: string[]) {
   const uniqueIds = [...new Set(assetIds)];
-  if (uniqueIds.length !== assetIds.length) throw new TRPCError({ code: "BAD_REQUEST", message: "Duplicate assets were attached." });
+  if (uniqueIds.length !== assetIds.length)
+    throw new TRPCError({ code: "BAD_REQUEST", message: "Duplicate assets were attached." });
   if (!uniqueIds.length) return;
   const owned = await db
     .select({ id: chatAttachment.id })
@@ -258,15 +336,27 @@ export async function validateAssetsForChat(userId: string, assetIds: string[]) 
 
 export async function linkAssetsToThread(userId: string, threadId: string, messageId: string, assetIds: string[]) {
   if (!assetIds.length) return;
-  await db
-    .update(chatAttachment)
-    .set({ threadId, messageId, status: "attached" })
+  const message = await db.query.chatMessage.findFirst({
+    where: and(eq(chatMessage.id, messageId), eq(chatMessage.threadId, threadId), eq(chatMessage.userId, userId)),
+    columns: { id: true },
+  });
+  if (!message) throw new TRPCError({ code: "NOT_FOUND", message: "Chat message not found." });
+  const ownedAssets = await db
+    .select({ id: chatAttachment.id })
+    .from(chatAttachment)
     .where(
       and(
         eq(chatAttachment.userId, userId),
         inArray(chatAttachment.id, assetIds),
         ne(chatAttachment.status, "deleted"),
-        or(isNull(chatAttachment.threadId), eq(chatAttachment.threadId, threadId)),
+        eq(chatAttachment.processingStatus, "ready"),
       ),
     );
+  if (ownedAssets.length !== new Set(assetIds).size) {
+    throw new TRPCError({ code: "FORBIDDEN", message: "One or more attached files are unavailable." });
+  }
+  await db
+    .insert(chatMessageAsset)
+    .values(assetIds.map((assetId) => ({ messageId, assetId, userId, threadId })))
+    .onConflictDoNothing({ target: [chatMessageAsset.messageId, chatMessageAsset.assetId] });
 }

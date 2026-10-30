@@ -16,7 +16,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   apiClient,
@@ -26,6 +26,9 @@ import {
   type RouterOutputs,
   type UnwrapApiData,
 } from "@/core/api/api.client";
+import { AssetFileIcon } from "@/module/assets/asset-file-icon";
+import { AssetUploadSteps } from "@/module/assets/asset-upload-steps";
+import { type AssetUploadProgress, uploadAndProcessAsset } from "@/module/assets/assets.upload";
 import {
   Attachment,
   AttachmentPreview,
@@ -165,9 +168,6 @@ import { PATH } from "@/shared/config/routes";
 import { useIsMobile } from "@/shared/utils/hooks/use-mobile";
 import { cn } from "@/shared/utils/lib/utils";
 import { CHAT_RECENT_THREADS_LIMIT, type ChatWorkspaceMessage, chatSuggestions } from "./chat.data";
-import { AssetUploadSteps } from "@/module/assets/asset-upload-steps";
-import { uploadAndProcessAsset, type AssetUploadProgress } from "@/module/assets/assets.upload";
-import { AssetFileIcon } from "@/module/assets/asset-file-icon";
 import { ChatMetaRail, ChatMetaRailToggle } from "./chat.meta-rail";
 import {
   CHAT_REASONING_LEVELS,
@@ -678,8 +678,11 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
   const [threadTitle, setThreadTitle] = useState(thread?.title ?? "Untitled chat");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [messageQueue, setMessageQueue] = useState<PromptInputMessage[]>([]);
-  const [assetUploads, setAssetUploads] = useState<Array<{ id: string; name: string; sizeBytes: number; progress: AssetUploadProgress }>>([]);
+  const [assetUploads, setAssetUploads] = useState<
+    Array<{ id: string; name: string; sizeBytes: number; progress: AssetUploadProgress }>
+  >([]);
   const [isUploadingAssets, setIsUploadingAssets] = useState(false);
+  const successfulAssetsBySource = useRef(new Map<string, { assetId: string; file: FileUIPart; sizeBytes: number }>());
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
@@ -948,11 +951,19 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
   const uploadAndSend = useCallback(
     async (message: PromptInputMessage) => {
       if (!message.files.length) {
-        await sendMessage(message.text.trim() ? { text: message.text.trim() } : { text: "" }, {
-          body: { model, reasoningEnabled, reasoningLevel, threadId: thread?.id, webSearch: useWebSearch, assetIds: [] },
-        });
+        const outgoing = message.text.trim() ? { text: message.text.trim() } : { text: "" };
         controller.textInput.setInput("");
         attachments.clear();
+        await sendMessage(outgoing, {
+          body: {
+            model,
+            reasoningEnabled,
+            reasoningLevel,
+            threadId: thread?.id,
+            webSearch: useWebSearch,
+            assetIds: [],
+          },
+        });
         return;
       }
 
@@ -974,29 +985,56 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
       try {
         for (const [index, source] of message.files.entries()) {
           const row = rows[index]!;
+          const sourceKey = `${source.url}\n${source.filename ?? ""}\n${source.mediaType ?? ""}`;
+          const existingUpload = successfulAssetsBySource.current.get(sourceKey);
+          if (existingUpload) {
+            uploadedFiles.push(existingUpload);
+            setAssetUploads((current) =>
+              current.map((item) =>
+                item.id === row.id
+                  ? {
+                      ...item,
+                      sizeBytes: existingUpload.sizeBytes,
+                      progress: { stage: "ready", progress: 100, message: "Ready to use in chat" },
+                    }
+                  : item,
+              ),
+            );
+            continue;
+          }
           const blob = await fetch(source.url).then((response) => response.blob());
           const file = new File([blob], source.filename || row.name, { type: source.mediaType || blob.type });
-          setAssetUploads((current) => current.map((item) => item.id === row.id ? { ...item, sizeBytes: file.size } : item));
+          setAssetUploads((current) =>
+            current.map((item) => (item.id === row.id ? { ...item, sizeBytes: file.size } : item)),
+          );
           const result = await uploadAndProcessAsset({
             file,
             userId: viewer?.user?.id ?? "",
             maxSizeBytes: 10 * 1024 * 1024,
             createAsset: (input) => createAsset.mutateAsync(input),
-            onProgress: (progress) => setAssetUploads((current) => current.map((item) => item.id === row.id ? { ...item, progress } : item)),
+            onProgress: (progress) =>
+              setAssetUploads((current) => current.map((item) => (item.id === row.id ? { ...item, progress } : item))),
           });
-          uploadedFiles.push({
+          const upload = {
             assetId: result.assetId,
             sizeBytes: file.size,
             file: {
-              type: "file",
+              type: "file" as const,
               url: `/api/assets/${result.assetId}/download`,
               filename: file.name,
               mediaType: file.type,
             },
-          });
+          };
+          uploadedFiles.push(upload);
+          successfulAssetsBySource.current.set(sourceKey, upload);
         }
 
-        const text = message.text.trim() || "Please briefly summarize each uploaded document and call out its main topics and useful details.";
+        const text =
+          message.text.trim() ||
+          "Please briefly summarize each uploaded document and call out its main topics and useful details.";
+        controller.textInput.setInput("");
+        attachments.clear();
+        setIsUploadingAssets(false);
         await sendMessage(
           { text, files: uploadedFiles.map((item) => item.file) },
           {
@@ -1010,15 +1048,19 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
             },
           },
         );
-        controller.textInput.setInput("");
-        attachments.clear();
+        successfulAssetsBySource.current.clear();
         void utils.assets.list.invalidate();
       } catch (error) {
         const messageText = error instanceof Error ? error.message : "Upload or document analysis failed.";
-        setAssetUploads((current) => current.map((item) => {
-          if (item.progress.stage === "ready") return item;
-          return { ...item, progress: { ...item.progress, stage: "failed", message: "Upload or analysis failed", error: messageText } };
-        }));
+        setAssetUploads((current) =>
+          current.map((item) => {
+            if (item.progress.stage === "ready") return item;
+            return {
+              ...item,
+              progress: { ...item.progress, stage: "failed", message: "Upload or analysis failed", error: messageText },
+            };
+          }),
+        );
         toast.error(messageText);
       } finally {
         setIsUploadingAssets(false);
@@ -1071,10 +1113,13 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
     ],
   );
 
-  const sendNextMessage = useCallback(async (message: PromptInputMessage) => {
-    if (!model) return;
-    await uploadAndSend(message);
-  }, [model, uploadAndSend]);
+  const sendNextMessage = useCallback(
+    async (message: PromptInputMessage) => {
+      if (!model) return;
+      await uploadAndSend(message);
+    },
+    [model, uploadAndSend],
+  );
 
   const isSubmitting = status === "submitted" || status === "streaming";
   const isBusy = renameThread.isPending || archiveThread.isPending || restoreThread.isPending;
@@ -1202,9 +1247,18 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
                   })
                 )}
                 {assetUploads.length ? (
-                  <div className="mx-auto mb-4 grid w-full max-w-3xl gap-2 px-4" aria-label="Document upload progress">
+                  <div
+                    className="mx-auto mb-4 grid w-full max-w-3xl gap-2 px-4"
+                    role="region"
+                    aria-label="Document upload progress"
+                  >
                     {assetUploads.map((item) => (
-                      <AssetUploadSteps key={item.id} name={item.name} sizeBytes={item.sizeBytes} progress={item.progress} />
+                      <AssetUploadSteps
+                        key={item.id}
+                        name={item.name}
+                        sizeBytes={item.sizeBytes}
+                        progress={item.progress}
+                      />
                     ))}
                   </div>
                 ) : null}

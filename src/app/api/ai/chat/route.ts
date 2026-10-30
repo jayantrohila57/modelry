@@ -148,12 +148,17 @@ export async function POST(req: Request) {
     }
 
     await validateAssetsForChat(user.id, assetIds);
-    const relevantChunks = await findRelevantAssetChunks({
-      userId: user.id,
-      query: extractPlainTextFromMessage(latestUserMessage),
-      limit: 6,
-      assetIds,
-    });
+    let relevantChunks: Awaited<ReturnType<typeof findRelevantAssetChunks>> = [];
+    try {
+      relevantChunks = await findRelevantAssetChunks({
+        userId: user.id,
+        query: extractPlainTextFromMessage(latestUserMessage),
+        limit: 6,
+        assetIds,
+      });
+    } catch (error) {
+      debugError("API:AI:CHAT", "Document retrieval unavailable; continuing without document excerpts", error);
+    }
 
     const prepared = await prepareChatExchange({
       latestUserMessage,

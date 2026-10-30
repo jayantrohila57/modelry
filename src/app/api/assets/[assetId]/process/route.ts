@@ -2,6 +2,7 @@ import { TRPCError } from "@trpc/server";
 import { getServerSession } from "@/core/auth/auth.server";
 import { processAsset } from "@/module/assets/assets.ingestion";
 import { jsonFailure, jsonSuccess } from "@/shared/config/api.utils";
+import { debugError } from "@/shared/utils/lib/logger.utils";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -22,10 +23,11 @@ export async function POST(_request: Request, { params }: { params: Promise<{ as
     const result = await processAsset(user.id, assetId);
     return jsonSuccess(result, "Document analysis finished.");
   } catch (error) {
+    debugError("ASSET_PROCESS_ROUTE", { error });
     const code = error instanceof TRPCError ? error.code : "INTERNAL_SERVER_ERROR";
     const httpStatus = code === "NOT_FOUND" ? 404 : code === "BAD_REQUEST" ? 400 : 500;
     return jsonFailure({
-      message: error instanceof Error ? error.message : "Document analysis failed.",
+      message: error instanceof TRPCError ? error.message : "Document analysis failed. Please retry.",
       code,
       kind: httpStatus === 500 ? "server" : "validation",
       httpStatus,

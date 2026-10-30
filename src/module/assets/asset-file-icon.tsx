@@ -1,4 +1,13 @@
-import { AudioLines, FileArchive, FileImage, FileSpreadsheet, FileText, Film, Presentation, Shapes } from "lucide-react";
+import {
+  AudioLines,
+  FileArchive,
+  FileImage,
+  FileSpreadsheet,
+  FileText,
+  Film,
+  Presentation,
+  Shapes,
+} from "lucide-react";
 import { Badge } from "@/shared/components/ui/badge";
 
 const fileTypeStyles: Record<string, string> = {
@@ -30,8 +39,17 @@ const fileTypeStyles: Record<string, string> = {
   zip: "bg-slate-500 text-white",
 };
 
-export function AssetFileIcon({ name, className = "" }: { name: string; className?: string }) {
-  const fileType = name.split(".").at(-1)?.trim().toLowerCase() || "file";
+export function AssetFileIcon({
+  name,
+  fileType: knownType,
+  className = "",
+}: {
+  name: string;
+  fileType?: string;
+  className?: string;
+}) {
+  const extension = name.includes(".") ? name.split(".").at(-1) : undefined;
+  const fileType = (knownType ?? extension)?.trim().toLowerCase() || "file";
   const Icon = ["xlsx", "ods", "xls", "csv"].includes(fileType)
     ? FileSpreadsheet
     : ["ppt", "pptx", "odp"].includes(fileType)
@@ -49,7 +67,9 @@ export function AssetFileIcon({ name, className = "" }: { name: string; classNam
                 : FileText;
 
   return (
-    <span className={`relative inline-flex size-10 shrink-0 items-center justify-center text-muted-foreground ${className}`}>
+    <span
+      className={`relative inline-flex size-10 shrink-0 items-center justify-center text-muted-foreground ${className}`}
+    >
       <Icon className="size-8 stroke-[1.25]" aria-hidden="true" />
       <Badge
         className={`absolute -bottom-0.5 left-1/2 min-w-8 -translate-x-1/2 justify-center border-2 border-background px-1 py-0 text-[9px] leading-4 uppercase shadow-sm ${fileTypeStyles[fileType] ?? "bg-slate-500 text-white"}`}

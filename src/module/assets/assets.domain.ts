@@ -62,7 +62,10 @@ export function getAssetFileType(name: string): AssetFileType {
 }
 
 function encodeHeaderFilename(value: string) {
-  return encodeURIComponent(value).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+  return encodeURIComponent(value).replace(
+    /[!'()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
 }
 
 export function getAssetContentDisposition(name: string, disposition: "inline" | "attachment") {
@@ -95,11 +98,64 @@ export function validateAssetUpload(input: {
   return { ok: true, fileType };
 }
 
+export function validateAssetContent(
+  buffer: Uint8Array,
+  fileType: Exclude<AssetFileType, "other">,
+): { ok: true } | { ok: false; reason: string } {
+  if (!buffer.byteLength) return { ok: false, reason: "The file is empty." };
+  const bytes = buffer;
+  const isZip =
+    bytes.length >= 4 &&
+    bytes[0] === 0x50 &&
+    bytes[1] === 0x4b &&
+    [0x03, 0x05, 0x07].includes(bytes[2]!) &&
+    [0x04, 0x06, 0x08].includes(bytes[3]!);
+  if (fileType === "pdf" && !new TextDecoder().decode(bytes.subarray(0, 1024)).includes("%PDF-")) {
+    return { ok: false, reason: "The file contents do not match the PDF extension." };
+  }
+  if (["docx", "xlsx", "pptx", "odt", "ods", "odp", "epub"].includes(fileType) && !isZip) {
+    return { ok: false, reason: "The file contents do not match the document extension." };
+  }
+  if (isZip) {
+    const archiveEntries = new TextDecoder().decode(bytes);
+    const expectedEntry =
+      fileType === "docx"
+        ? "word/document.xml"
+        : fileType === "xlsx"
+          ? "xl/workbook.xml"
+          : fileType === "pptx"
+            ? "ppt/presentation.xml"
+            : ["odt", "ods", "odp"].includes(fileType)
+              ? "content.xml"
+              : fileType === "epub"
+                ? "mimetype"
+                : undefined;
+    if (expectedEntry && !archiveEntries.includes(expectedEntry)) {
+      return { ok: false, reason: "The file contents do not match the document extension." };
+    }
+  }
+  if (fileType === "rtf" && !new TextDecoder().decode(bytes.subarray(0, 32)).startsWith("{\\rtf")) {
+    return { ok: false, reason: "The file contents do not match the RTF extension." };
+  }
+  if (!["pdf", "docx", "xlsx", "pptx", "odt", "ods", "odp", "epub"].includes(fileType)) {
+    if (bytes.includes(0)) return { ok: false, reason: "The file contains unsupported binary data." };
+    try {
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      return { ok: false, reason: "The file is not valid UTF-8 text." };
+    }
+  }
+  return { ok: true };
+}
+
 export function splitTextIntoChunks(
   text: string,
   options: { maxCharacters: number; overlapCharacters: number },
 ): string[] {
-  const normalizedText = text.replace(/\r\n/g, "\n").replace(/[\t ]+\n/g, "\n").trim();
+  const normalizedText = text
+    .replace(/\r\n/g, "\n")
+    .replace(/[\t ]+\n/g, "\n")
+    .trim();
   const maxCharacters = Math.max(1, Math.floor(options.maxCharacters));
   const overlapCharacters = Math.max(0, Math.min(Math.floor(options.overlapCharacters), maxCharacters - 1));
   const chunks: string[] = [];

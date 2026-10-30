@@ -8,11 +8,17 @@ export const listAssetsInputSchema = z.object({
   fileType: z.string().trim().max(16).optional(),
   category: z.string().trim().max(80).optional(),
   folderId: z.union([folderId, z.literal("root")]).optional(),
+  page: z.number().int().min(1).max(100_000).default(1),
 });
 
 export const createAssetInputSchema = z.object({
   name: z.string().trim().min(1).max(255),
-  pathname: z.string().trim().min(1).max(512).regex(/^assets\/[a-zA-Z0-9/_-]+\.[a-zA-Z0-9]+$/),
+  pathname: z
+    .string()
+    .trim()
+    .min(1)
+    .max(512)
+    .regex(/^assets\/[a-zA-Z0-9/_-]+\.[a-zA-Z0-9]+$/),
   mimeType: z.string().trim().min(1).max(255),
   folderId: folderId.optional(),
 });

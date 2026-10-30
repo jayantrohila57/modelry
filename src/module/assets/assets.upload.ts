@@ -57,9 +57,10 @@ export async function uploadAndProcessAsset(input: {
   if (!validation.ok) throw new Error(validation.reason);
   if (fileType === "other") throw new Error("This file type is not supported for document analysis.");
 
-  const mimeType = input.file.type && getAllowedMimeTypes(fileType).includes(input.file.type)
-    ? input.file.type
-    : getAllowedMimeTypes(fileType)[0]!;
+  const mimeType =
+    input.file.type && getAllowedMimeTypes(fileType).includes(input.file.type)
+      ? input.file.type
+      : getAllowedMimeTypes(fileType)[0]!;
   const extension = fileType;
   const pathname = buildAssetPathname(input.userId, extension);
   input.onProgress({ stage: "uploading", progress: 0, message: stageMessage.uploading });
@@ -87,16 +88,18 @@ export async function uploadAndProcessAsset(input: {
   let processError: Error | undefined;
   const processRequest = fetch(`/api/assets/${assetId}/process`, {
     method: "POST",
-    signal: AbortSignal.timeout(305_000),
-  }).then(async (response) => {
-    if (response.ok) return;
-    const body = (await response.json().catch(() => ({}))) as { message?: string };
-    throw new Error(body.message || "Document analysis failed.");
-  }).catch((error: unknown) => {
-    processError = error instanceof Error ? error : new Error("Document analysis failed.");
-  });
+    signal: AbortSignal.timeout(320_000),
+  })
+    .then(async (response) => {
+      if (response.ok) return;
+      const body = (await response.json().catch(() => ({}))) as { message?: string };
+      throw new Error(body.message || "Document analysis failed.");
+    })
+    .catch((error: unknown) => {
+      processError = error instanceof Error ? error : new Error("Document analysis failed.");
+    });
   let completed: AssetStatusResponse["data"] | undefined;
-  const deadline = Date.now() + 305_000;
+  const deadline = Date.now() + 320_000;
   while (!completed) {
     if (processError) throw processError;
     if (Date.now() >= deadline) throw new Error("Document analysis timed out. Try again from the Assets page.");
