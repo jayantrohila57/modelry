@@ -6,18 +6,22 @@ import {
   ArchiveRestore,
   BrainIcon,
   CheckIcon,
+  CopyIcon,
   GlobeIcon,
   Info,
   InfoIcon,
   Layers,
   MessageCircleIcon,
   MoreHorizontal,
+  PencilIcon,
+  RotateCwIcon,
   Sparkles,
   XIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useStickToBottomContext } from "use-stick-to-bottom";
 import {
   apiClient,
   getApiErrorMessage,
@@ -29,7 +33,7 @@ import {
 import { AssetFileIcon } from "@/module/assets/asset-file-icon";
 import { AssetUploadSteps } from "@/module/assets/asset-upload-steps";
 import { type AssetUploadProgress, uploadAndProcessAsset } from "@/module/assets/assets.upload";
-import { createChatWorkspaceKey } from "@/module/chat/chat.navigation";
+import { announceChatChange, createChatWorkspaceKey, getNewChatDestination } from "@/module/chat/chat.navigation";
 import { createRetryChatRequest, resolveChatRequestThreadId } from "@/module/chat/chat.request.utils";
 import {
   Attachment,
@@ -68,6 +72,8 @@ import {
 } from "@/shared/components/ai-elements/inline-citation";
 import {
   Message,
+  MessageAction,
+  MessageActions,
   MessageBranch,
   MessageBranchContent,
   MessageBranchNext,
@@ -130,7 +136,14 @@ import { Shimmer } from "@/shared/components/ai-elements/shimmer";
 import { Source, Sources, SourcesContent, SourcesTrigger } from "@/shared/components/ai-elements/sources";
 import { SpeechInput } from "@/shared/components/ai-elements/speech-input";
 import { Suggestion, Suggestions } from "@/shared/components/ai-elements/suggestion";
-import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "@/shared/components/ai-elements/tool";
+import {
+  Tool,
+  ToolContent,
+  ToolHeader,
+  ToolInput,
+  ToolOutput,
+  type ToolPart,
+} from "@/shared/components/ai-elements/tool";
 import Shell from "@/shared/components/layout/shell";
 import { useSettingsDialog } from "@/shared/components/provider/global-modal.provider";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/components/ui/alert";
@@ -165,6 +178,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/shared/componen
 import { Input } from "@/shared/components/ui/input";
 import { Label } from "@/shared/components/ui/label";
 import { Spinner } from "@/shared/components/ui/spinner";
+import { Textarea } from "@/shared/components/ui/textarea";
 import { Toggle } from "@/shared/components/ui/toggle";
 import { PATH } from "@/shared/config/routes";
 import { useIsMobile } from "@/shared/utils/hooks/use-mobile";
@@ -178,6 +192,7 @@ import {
   formatReasoningLevelLabel,
 } from "./chat.runtime";
 import {
+  formatMessageTimestamp,
   getMessageMetadata,
   getReasoningFromUiMessage,
   getTextFromUiMessage,
@@ -220,10 +235,29 @@ function mapUiMessagesToWorkspaceMessages(messages: UIMessage[]): ChatWorkspaceM
     const metadata = getMessageMetadata(message);
     const textContent = getTextFromUiMessage(message);
     const reasoning = getReasoningFromUiMessage(message);
+    const toolParts = message.parts.flatMap((part) => {
+      if (part.type === "dynamic-tool" || part.type.startsWith("tool-")) {
+        const toolPart = part as ToolPart;
+        return [
+          {
+            type: toolPart.type,
+            toolName: toolPart.type === "dynamic-tool" ? toolPart.toolName : toolPart.type.slice(5),
+            state: toolPart.state,
+            input: toolPart.input,
+            output: toolPart.output,
+            errorText: toolPart.errorText,
+          },
+        ];
+      }
+
+      return [];
+    });
 
     return {
       from: message.role === "user" ? "user" : "assistant",
       key: message.id,
+      createdAt: (message as UIMessage & { createdAt?: Date }).createdAt,
+      toolParts,
       metadata: {
         model: metadata.model,
         provider: metadata.provider,
@@ -259,6 +293,14 @@ function mapUiMessagesToWorkspaceMessages(messages: UIMessage[]): ChatWorkspaceM
         },
       ],
     } satisfies ChatWorkspaceMessage;
+  });
+}
+
+function getAssetIdsFromMessage(message: UIMessage | undefined) {
+  return (message?.parts ?? []).flatMap((part) => {
+    if (part.type !== "file") return [];
+    const match = part.url.match(/\/api\/assets\/([0-9a-f-]+)\/download/i);
+    return match ? [match[1]] : [];
   });
 }
 
@@ -357,6 +399,38 @@ function DraftSync({ draftKey }: { draftKey: string }) {
       cancelled = true;
     };
   }, [attachments.files, controller.textInput.value, deferredText, draftKey]);
+
+  return null;
+}
+
+function ConversationScrollRestoration({ threadId }: { threadId: string | null }) {
+  const { scrollRef } = useStickToBottomContext();
+  const storageKey = `modelry:chat-scroll:${threadId ?? "landing"}`;
+
+  useEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (!scrollElement) return;
+
+    let restored = false;
+    let frame = 0;
+    const restore = () => {
+      const savedPosition = Number(sessionStorage.getItem(storageKey));
+      if (Number.isFinite(savedPosition) && savedPosition > 0) {
+        scrollElement.scrollTop = savedPosition;
+      }
+      restored = true;
+    };
+    frame = window.requestAnimationFrame(restore);
+    const save = () => {
+      if (restored) sessionStorage.setItem(storageKey, String(scrollElement.scrollTop));
+    };
+    scrollElement.addEventListener("scroll", save, { passive: true });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      save();
+      scrollElement.removeEventListener("scroll", save);
+    };
+  }, [scrollRef, storageKey]);
 
   return null;
 }
@@ -681,6 +755,8 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
   const [useWebSearch, setUseWebSearch] = useState(false);
   const [threadTitle, setThreadTitle] = useState(thread?.title ?? "Untitled chat");
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editMessageText, setEditMessageText] = useState("");
   const [messageQueue, setMessageQueue] = useState<PromptInputMessage[]>([]);
   const failedExchangeRef = useRef<{
     body: {
@@ -730,12 +806,43 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
     }
   }, [allowedModels, availableModels, thread?.model]);
 
-  const invalidateThreadLists = useCallback(() => {
-    void utils.chat.list.invalidate({ archived: false, limit: CHAT_RECENT_THREADS_LIMIT });
-    void utils.chat.list.invalidate({ archived: true, limit: CHAT_RECENT_THREADS_LIMIT });
-  }, [utils]);
+  const invalidateThreadLists = useCallback(
+    (announce = true) => {
+      if (announce) announceChatChange();
+      void utils.chat.list.invalidate({ archived: false, limit: CHAT_RECENT_THREADS_LIMIT });
+      void utils.chat.list.invalidate({ archived: true, limit: CHAT_RECENT_THREADS_LIMIT });
+    },
+    [utils],
+  );
 
-  const { messages, sendMessage, status, stop } = useChat({
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      const target = event.target;
+      const isEditable =
+        target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA"].includes(target.tagName));
+      if (event.altKey && event.key.toLowerCase() === "n" && !isEditable) {
+        event.preventDefault();
+        router.push(getNewChatDestination());
+      }
+    };
+
+    const handleCrossTabChange = (event: StorageEvent) => {
+      if (event.key === "modelry:chat-sync") {
+        invalidateThreadLists(false);
+        if (thread?.id) void utils.chat.get.invalidate({ threadId: thread.id });
+        router.refresh();
+      }
+    };
+
+    window.addEventListener("keydown", handleShortcut);
+    window.addEventListener("storage", handleCrossTabChange);
+    return () => {
+      window.removeEventListener("keydown", handleShortcut);
+      window.removeEventListener("storage", handleCrossTabChange);
+    };
+  }, [invalidateThreadLists, router, thread?.id, utils.chat.get]);
+
+  const { messages, sendMessage, status, stop, setMessages, regenerate } = useChat({
     id: thread?.id ?? "landing-chat",
     messages: initialUiMessages,
     onError: (nextError) => {
@@ -796,6 +903,76 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
     await sendMessage(retryRequest.message, { body: retryRequest.body });
   }, [sendMessage]);
 
+  const startEditingMessage = useCallback((message: UIMessage) => {
+    setEditingMessageId(message.id);
+    setEditMessageText(getTextFromUiMessage(message));
+  }, []);
+
+  const saveEditedMessage = useCallback(async () => {
+    const messageIndex = messages.findIndex((message) => message.id === editingMessageId && message.role === "user");
+    const target = messages[messageIndex];
+    const editedText = editMessageText.trim();
+
+    if (!target || !editedText || status === "submitted" || status === "streaming") return;
+
+    const editedMessage: UIMessage = {
+      ...target,
+      parts: [{ type: "text", text: editedText }, ...target.parts.filter((part) => part.type === "file")],
+    };
+    setMessages(messages.slice(0, messageIndex));
+    setEditingMessageId(null);
+    setEditMessageText("");
+    await sendMessage(editedMessage, {
+      body: {
+        assetIds: getAssetIdsFromMessage(target),
+        model,
+        operation: "edit",
+        reasoningEnabled,
+        reasoningLevel,
+        threadId: requestThreadId,
+        webSearch: useWebSearch,
+      },
+    });
+  }, [
+    editMessageText,
+    editingMessageId,
+    messages,
+    model,
+    reasoningEnabled,
+    reasoningLevel,
+    requestThreadId,
+    sendMessage,
+    setMessages,
+    status,
+    useWebSearch,
+  ]);
+
+  const regenerateLastAnswer = useCallback(async () => {
+    if (!thread?.id || status === "submitted" || status === "streaming") return;
+    const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
+    await regenerate({
+      body: {
+        assetIds: getAssetIdsFromMessage(lastUserMessage),
+        model,
+        operation: "regenerate",
+        reasoningEnabled,
+        reasoningLevel,
+        threadId: requestThreadId,
+        webSearch: useWebSearch,
+      },
+    });
+  }, [
+    messages,
+    model,
+    reasoningEnabled,
+    reasoningLevel,
+    regenerate,
+    requestThreadId,
+    status,
+    thread?.id,
+    useWebSearch,
+  ]);
+
   const renderedMessages = useMemo(() => mapUiMessagesToWorkspaceMessages(messages), [messages]);
   const reasoningSupported = selectedModelData?.supportsReasoning ?? true;
 
@@ -834,7 +1011,7 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
         router.push(PATH.CHAT.ROOT);
       });
     },
-    onSettled: invalidateThreadLists,
+    onSettled: () => invalidateThreadLists(),
   });
 
   const restoreThread = apiClient.chat.restore.useMutation({
@@ -852,7 +1029,7 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
       }
       router.refresh();
     },
-    onSettled: invalidateThreadLists,
+    onSettled: () => invalidateThreadLists(),
   });
 
   useEffect(() => {
@@ -1233,12 +1410,16 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
           ) : null}
           <div className="flex min-h-0 flex-1 flex-col divide-y overflow-hidden">
             <Conversation>
+              <ConversationScrollRestoration threadId={thread?.id ?? null} />
               <ConversationContent>
                 {renderedMessages.length === 0 ? (
                   <EmptyConversationState mode={mode} />
                 ) : (
                   renderedMessages.map(({ versions, ...message }) => {
                     const isReasoningStreaming = message.metadata?.status === "streaming";
+                    const sourceMessage = messages.find((item) => item.id === message.key);
+                    const isLastAssistant =
+                      message.from === "assistant" && renderedMessages.at(-1)?.key === message.key;
 
                     return (
                       <MessageBranch defaultBranch={0} key={message.key}>
@@ -1282,9 +1463,110 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
                                       ))}
                                     </div>
                                   ) : null}
-                                  <MessageResponse>{version.content}</MessageResponse>
+                                  {editingMessageId === message.key ? (
+                                    <div className="grid gap-2">
+                                      <Textarea
+                                        aria-label="Edit your message"
+                                        autoFocus
+                                        onChange={(event) => setEditMessageText(event.target.value)}
+                                        onKeyDown={(event) => {
+                                          if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                                            event.preventDefault();
+                                            void saveEditedMessage();
+                                          }
+                                        }}
+                                        value={editMessageText}
+                                      />
+                                      <div className="flex gap-2">
+                                        <Button
+                                          disabled={!editMessageText.trim() || isSubmitting}
+                                          onClick={() => void saveEditedMessage()}
+                                          size="sm"
+                                          type="button"
+                                        >
+                                          <CheckIcon data-icon="inline-start" />
+                                          Save and resend
+                                        </Button>
+                                        <Button
+                                          onClick={() => setEditingMessageId(null)}
+                                          size="sm"
+                                          type="button"
+                                          variant="ghost"
+                                        >
+                                          Cancel
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <MessageResponse>{version.content}</MessageResponse>
+                                  )}
                                 </MessageContent>
+                                {message.toolParts?.map((toolPart, index) => (
+                                  <Tool
+                                    defaultOpen={
+                                      toolPart.state === "input-streaming" || toolPart.state === "input-available"
+                                    }
+                                    key={`${message.key}-tool-${index}`}
+                                  >
+                                    <ToolHeader
+                                      state={toolPart.state as ToolPart["state"]}
+                                      title={`Tool: ${toolPart.toolName}`}
+                                      {...(toolPart.type === "dynamic-tool"
+                                        ? { type: "dynamic-tool" as const, toolName: toolPart.toolName }
+                                        : { type: toolPart.type as `tool-${string}` })}
+                                    />
+                                    <ToolContent>
+                                      <ToolInput input={toolPart.input as ToolPart["input"]} />
+                                      <ToolOutput
+                                        errorText={toolPart.errorText}
+                                        output={toolPart.output as ToolPart["output"]}
+                                      />
+                                    </ToolContent>
+                                  </Tool>
+                                ))}
                                 {message.from === "assistant" ? <MessageUsage message={message} /> : null}
+                                <div className="flex items-center justify-between gap-3 px-1">
+                                  <time
+                                    className="text-xs text-muted-foreground"
+                                    dateTime={message.createdAt?.toISOString()}
+                                  >
+                                    {message.createdAt ? formatMessageTimestamp(message.createdAt) : null}
+                                  </time>
+                                  <MessageActions>
+                                    <MessageAction
+                                      label="Copy message"
+                                      onClick={() => {
+                                        void navigator.clipboard.writeText(version.content).then(
+                                          () => toast.success("Message copied."),
+                                          () => toast.error("Could not copy this message."),
+                                        );
+                                      }}
+                                      tooltip="Copy message"
+                                    >
+                                      <CopyIcon />
+                                    </MessageAction>
+                                    {message.from === "user" && sourceMessage ? (
+                                      <MessageAction
+                                        disabled={isSubmitting || isArchived || !thread?.id}
+                                        label="Edit and resend message"
+                                        onClick={() => startEditingMessage(sourceMessage)}
+                                        tooltip="Edit and resend"
+                                      >
+                                        <PencilIcon />
+                                      </MessageAction>
+                                    ) : null}
+                                    {isLastAssistant ? (
+                                      <MessageAction
+                                        disabled={isSubmitting || isArchived}
+                                        label="Regenerate response"
+                                        onClick={() => void regenerateLastAnswer()}
+                                        tooltip="Regenerate response"
+                                      >
+                                        <RotateCwIcon />
+                                      </MessageAction>
+                                    ) : null}
+                                  </MessageActions>
+                                </div>
                               </div>
                             </Message>
                           ))}
@@ -1401,7 +1683,11 @@ function ChatWorkspaceInner({ mode, thread, initialMessages = [] }: ChatWorkspac
                   </PromptInputHeader>
                   <PromptInputBody>
                     <div className="flex items-start w-full px-2 justify-between">
-                      <PromptInputTextarea className="max-w-xl w-full" disabled={isArchived} />
+                      <PromptInputTextarea
+                        autoFocus={mode === "landing" && renderedMessages.length === 0}
+                        className="max-w-xl w-full"
+                        disabled={isArchived}
+                      />
                       <span className="text-muted-foreground text-xs">
                         {/* 
                           Rough token estimation:

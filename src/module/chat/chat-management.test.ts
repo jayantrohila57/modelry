@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { createRuntimeAiModelId, getRuntimeProviderModelFromId, isRuntimeAiModelId } from "@/module/ai/ai.models";
-import { getSafePostSignInCallback } from "@/module/auth/auth.callback";
 import { addAdditionalPromptContextTokens, estimateTokenCount } from "@/module/ai/ai.tokens";
-import { getReasoningLevelTemperature } from "@/module/chat/chat.runtime";
-import { mapPersistedMessagesToUiMessages } from "@/module/chat/chat-message.utils";
+import { getSafePostSignInCallback } from "@/module/auth/auth.callback";
 import { createChatWorkspaceKey, getNewChatDestination, groupThreadsByActivity } from "@/module/chat/chat.navigation";
 import {
   createRetryChatRequest,
   normalizeChatSearchQuery,
   resolveChatRequestThreadId,
 } from "@/module/chat/chat.request.utils";
+import { getReasoningLevelTemperature } from "@/module/chat/chat.runtime";
 import { pinThreadInputSchema } from "@/module/chat/chat.schema";
 import { buildArchivedThreadDeleteCondition, buildThreadSearchCondition } from "@/module/chat/chat.service";
+import { formatMessageTimestamp, mapPersistedMessagesToUiMessages } from "@/module/chat/chat-message.utils";
 import {
   clearThreadDraftSnapshot,
   createThreadDraftKey,
@@ -50,6 +50,7 @@ assert.equal(result[0]?.id, "client-1");
 assert.equal(result[0]?.role, "user");
 assert.equal(result[0]?.parts[0]?.type, "text");
 assert.equal(result[0]?.parts[0]?.text, "Hello there");
+assert.match(formatMessageTimestamp(new Date("2026-03-31T10:00:00.000Z")), /UTC/);
 assert.deepEqual(result[0]?.metadata, {
   completionTokens: 0,
   creditCost: 0,

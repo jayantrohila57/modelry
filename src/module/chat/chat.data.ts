@@ -1,6 +1,15 @@
 export type ChatWorkspaceMessage = {
   key: string;
   from: "user" | "assistant";
+  createdAt?: Date;
+  toolParts?: Array<{
+    type: string;
+    toolName: string;
+    state: string;
+    input: unknown;
+    output?: unknown;
+    errorText?: string;
+  }>;
   sources?: { href: string; title: string }[];
   versions: {
     id: string;

@@ -9,6 +9,12 @@ export function createChatWorkspaceKey(threadId: string | null | undefined, isAr
   return `${createThreadDraftKey(threadId)}:${isArchived ? "archived" : "active"}`;
 }
 
+export function announceChatChange() {
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem("modelry:chat-sync", String(Date.now()));
+  }
+}
+
 type ThreadActivity = { id: string; isPinned?: boolean; lastMessageAt: Date };
 
 export function groupThreadsByActivity<T extends ThreadActivity>(threads: T[], now = new Date()) {
