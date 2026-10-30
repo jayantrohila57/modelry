@@ -1291,7 +1291,7 @@ function ChatWorkspaceInner({
     <Shell>
       <Shell.Section
         className={cn(
-          "grid size-full min-w-0 w-full max-w-none grid-cols-1 overflow-hidden px-0",
+          "grid size-full h-dvh min-h-0 min-w-0 w-full max-w-none grid-cols-1 overflow-hidden px-0 md:h-[calc(100dvh-1rem)]",
           !isMobile && detailsOpen
             ? "xl:grid-cols-[minmax(0,1fr)_minmax(0,340px)]"
             : "xl:grid-cols-[minmax(0,1fr)_0px]",
